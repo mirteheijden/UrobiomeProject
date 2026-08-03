@@ -36,15 +36,6 @@ download FASTA file from here: https://www.ncbi.nlm.nih.gov/data-hub/genome/GCA_
 - $ cd /scratch/project_200XXXX/human_feces_batch1/RESULTS/metaphlan
 - $ merge_metaphlan_tables.py db_meta4/*metaphlan_profile.txt > metaphlan_db_meta4_combined_reports.txt
 - Check the removal of the human reads by calculating the reads in the Raw data (reads_count_preprocess), after human removal:
-- $ cd ./SCRIPTS
-- $ nano reads_count_preprocess
-- $ nano reads_count_postprocess
-- Run the scripts, one by one:
-- $ chmod +x reads_count_preprocess
-- $ ./reads_count_preprocess
-- $ chmod +x reads_count_postprocess
-- $ ./reads_count_postprocess
--  Results can be found in RESULTS/reads_count_preprocess.tsv, and RESULTS/reads_count_postprocess
--  Move .tsv files to PC using WinSCP
+-  Move file to PC using WinSCP
 
 
