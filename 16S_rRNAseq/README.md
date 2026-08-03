@@ -37,4 +37,6 @@ download FASTA file from here: https://www.ncbi.nlm.nih.gov/data-hub/genome/GCA_
   - Copy this to text file to a .csv file (Excel), and keep only the rows with bacteria
   - The metadata will be used in our Metadata file, so make sure you check to which samples S1, S2, S3 etc belong
 
+  - These results can then be used for downstream processing, using the /SCRIPTS/Downstream_processing_Rstudio
+
 
