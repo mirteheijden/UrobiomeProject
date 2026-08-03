@@ -38,4 +38,4 @@ download FASTA file from here: https://www.ncbi.nlm.nih.gov/data-hub/genome/GCA_
 - Check the removal of the human reads by calculating the reads in the Raw data (reads_count_preprocess), after human removal:
 -  Move file to PC using WinSCP
 
-
+ - These results can then be used for downstream processing, using the /SCRIPTS/Downstream_processing_Rstudio
