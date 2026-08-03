@@ -1,4 +1,2 @@
 tool,db_name,db_params,db_type,db_path
-metaphlan,db_meta4,,short,/scratch/project_2008347/nextflow_metagenomics/DB/db_MetaPhlan4/metaphlan_databases/
-motus,db_mOTU,,short,/scratch/project_2008347/nextflow_metagenomics/DB/db_mOTU/
-kraken2,db_kraken2,,short,/scratch/project_2008347/Tumor_microbiome/DATABASE/Kraken2/16S_SILVA138_k2db
+metaphlan,db_meta4,,short,/scratch/project_200XXXX/nextflow_metagenomics/DB/db_MetaPhlan4/metaphlan_databases/
