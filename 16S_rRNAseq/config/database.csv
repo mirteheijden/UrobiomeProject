@@ -1,2 +1,2 @@
 tool,db_name,db_params,db_type,db_path
-kraken2,db_kraken2,,short,/scratch/project_2008347/Tumor_microbiome/DATABASE/Kraken2/16S_SILVA138_k2db
+kraken2,db_kraken2,,short,/scratch/project_200XXXX/Tumor_microbiome/DATABASE/Kraken2/16S_SILVA138_k2db
