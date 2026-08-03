@@ -7,7 +7,7 @@ In Puhti, set working directory: config, DATA, DB, LOGS, RESULTS, SCRIPTS, workf
 - upload the fastq.qz files into the cd /scratch/project_XXXX/human_urine_shotgun_metagenomics/DATA folder (e.g. using WinSCP)
 
 **download databases:**
-- cd  /scratch/project_XXXX/human_urine_shotgun_metagenomics/DB/
+-  $ cd  /scratch/project_XXXX/human_urine_shotgun_metagenomics/DB/
 
 **Human reference database:**
 download FASTA file from here: https://www.ncbi.nlm.nih.gov/data-hub/genome/GCA_009914755.4/ If you downloaded it from local dir copy it to puhti using scp 
