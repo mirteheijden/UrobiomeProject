@@ -1,340 +1,4 @@
-
-########## 16S rRNAseq
-
-#BiocManager::install("ANCOMBC")
-
-# Load required packages
-library(qiime2R)
-library(mia)
-library(miaViz)
-library(TreeSummarizedExperiment)
-library(dplyr)
-library(phyloseq)
-library(ggplot2)
-library(patchwork)
-library(ecodist)
-library(data.table)
-library(vegan)
-library(ggforce)
-library(MicrobiomeStat)
-library(tibble)
-library(ANCOMBC)
-library(foreach)
-library(rngtools)
-library(ggplot2)
-library(readr)
-
-## Phyloseq
-phyloseq <- readRDS("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/RESULTS_ampliseq/phyloseq/dada2_phyloseq.rds")
-head(otu_table(phyloseq))
-head(tax_table(phyloseq))
-
-# Read the metadata TSV file
-metadata_path <- "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/config/metadata.tsv"
-sample_metadata_df <- read_tsv(metadata_path)
-
-# Create the TreeSummarizedExperiment object from the phyloseq object
-tse_phylo <- mia::convertFromPhyloseq(phyloseq)
-
-# Add the sample metadata to the colData of the TSE object
-colData(tse_phylo) <- DataFrame(sample_metadata_df)
-
-# Check the TSE object
-print(tse_phylo)
-colData(tse_phylo)
-
-# change rownames of the tse, to our sample_ID
-col_data_tse_phylo <- colData(tse_phylo)
-rownames(col_data_tse_phylo) <- col_data_tse_phylo$Patient_day
-colData(tse_phylo) <- col_data_tse_phylo
-col_data_tse_phylo <- as.data.frame(colData(tse_phylo))
-
-colData(tse_phylo)
-
-# change rownames of the tse, to our sample_ID
-col_data_phylo <- colData(tse_phylo)
-rownames(col_data_phylo) <- col_data_phylo$Patient_day
-colData(tse_phylo) <- col_data_phylo
-col_data_phylo <- as.data.frame(colData(tse_phylo))
-
-
-
-##### Response ####### Genus
-# After creating tse_phylo, replace row names with Genus names
-row_data <- rowData(tse_phylo)
-
-# Create unique genus names (add number suffix for duplicates)
-genus_names <- as.character(row_data$Genus)
-genus_names[is.na(genus_names) | genus_names == ""] <- "Unknown"
-genus_names <- make.unique(genus_names, sep = "_")
-
-# Replace row names in the TSE
-rownames(tse_phylo) <- genus_names
-
-tse <- tse_phylo
-
-
-# Extract day 1 samples and samples with a known disease outcome
-tse <- tse[, which(colData(tse)$Day == "1")]
-tse <- tse[, which(colData(tse)$Trial == "T563")]
-tse <- tse[, which(colData(tse)$Response %in% c("No_DC", "DC"))]
-
-# Transform count assay to relative abundances
-tse_rel <- transformAssay(tse,
-                          assay.type = "counts",
-                          method = "relabundance")
-
-# Convert to phyloseq object
-pseq <- makePhyloseqFromTreeSummarizedExperiment(tse_rel)
-pseq_Genus <- phyloseq::tax_glom(pseq, taxrank = "Genus")
-
-# Perform ANCOMBC analysis, comparing DC vs No_DC
-out_gg2_Genus = ancombc(
-  data = pseq_Genus, 
-  formula = "Response", 
-  p_adj_method = "fdr", 
-  lib_cut = 0, 
-  group = "Response", 
-  struc_zero = TRUE, 
-  neg_lb = TRUE, 
-  tol = 1e-5, 
-  max_iter = 100, 
-  conserve = TRUE, 
-  alpha = 0.05, 
-  global = TRUE
-)
-
-# Extract results for No_DC (which includes log fold changes for the comparison between DC and No_DC)
-res <- out_gg2_Genus$res
-
-# Compute log fold change for DC vs No_DC
-results <- data.frame(
-  taxon = res$lfc$taxon,
-  log_fold_change = -res$lfc$ResponseNo_DC,
-  q_value = as.numeric(as.character(res$q_val$ResponseNo_DC)),
-  differentially_abundant = res$diff_abn$ResponseNo_DC
-)
-
-# Filter for significant results
-significant_results <- results[results$differentially_abundant == TRUE, ]
-significant_results <- significant_results[significant_results$q_value < 0.05,]
-significant_results <- significant_results[significant_results$log_fold_change < 0 | significant_results$log_fold_change > 0,]
-
-# Print the significant results
-print(significant_results)
-
-## Bar plot
-
-# Extract the row names and Genus column from rowData(tse_rel)
-row_data <- rowData(tse_rel)
-row_names_to_Genus <- data.frame(
-  row_name = rownames(row_data),
-  Genus = row_data$Genus
-)
-
-# Create a lookup table for easy matching
-lookup_table <- setNames(row_names_to_Genus$Genus, row_names_to_Genus$row_name)
-
-# Replace values in the 'taxon' column of significant_results
-significant_results <- significant_results %>%
-  mutate(taxon = ifelse(taxon %in% names(lookup_table), 
-                        lookup_table[taxon], 
-                        taxon))
-
-# Add Response column based on log_fold_change direction
-significant_results$Response <- ifelse(significant_results$log_fold_change > 0, "DC", "No_DC")
-
-# Assign colors based on Response only
-significant_results$highlight <- ifelse(significant_results$Response == "DC", "blue", "orange")
-
-# Ensure 'highlight' is a factor
-significant_results$highlight <- factor(significant_results$highlight, 
-                                        levels = c("blue", "orange"))
-
-# Create the bar plot with custom colors
-bar_plot <- ggplot(significant_results, aes(x = reorder(taxon, log_fold_change), y = log_fold_change, fill = highlight)) +
-  geom_bar(stat = "identity", show.legend = TRUE) +
-  scale_fill_manual(name = NULL,
-                    values = c("blue" = "blue", "orange" = "orange"),
-                    labels = c("blue" = "DC", 
-                               "orange" = "No_DC")) +
-  coord_flip() +
-  labs(title = "Differential abundant genus 
-            (16S rRNAseq)", x = "Taxon", y = "Log Fold Change") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 18),
-        axis.title.y = element_text(size = 18),  
-        plot.title = element_text(size = 16, face = "bold", hjust = 0),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank()
-  ) +
-  guides(fill = guide_legend(title = ""))
-
-# Print the plot
-print(bar_plot)
-
-
-
-
-
-
-
-
-
-
-
-##### Response ####### Species
-# After creating tse_phylo, replace row names with Species names
-row_data <- rowData(tse_phylo)
-
-# Create unique Species names (add number suffix for duplicates)
-Species_names <- as.character(row_data$Species)
-Species_names[is.na(Species_names) | Species_names == ""] <- "Unknown"
-Species_names <- make.unique(Species_names, sep = "_")
-
-# Replace row names in the TSE
-rownames(tse_phylo) <- Species_names
-
-tse <- tse_phylo
-
-
-# Extract day 1 samples and samples with a known disease outcome
-tse <- tse[, which(colData(tse)$Day == "1")]
-tse <- tse[, which(colData(tse)$Trial == "T563")]
-tse <- tse[, which(colData(tse)$Response %in% c("No_DC", "DC"))]
-
-# Transform count assay to relative abundances
-tse_rel <- transformAssay(tse,
-                          assay.type = "counts",
-                          method = "relabundance")
-
-# Check relative abundance
-assay_data <- assay(tse_rel, "relabundance")
-
-col_sums <- colSums(assay_data)
-
-summary(col_sums)
-
-assayNames(tse_rel)
-
-# Convert to phyloseq object
-pseq <- makePhyloseqFromTreeSummarizedExperiment(tse_rel)
-pseq_Species <- phyloseq::tax_glom(pseq, taxrank = "Species")
-
-# Perform ANCOMBC analysis, comparing DC vs No_DC
-out_gg2_Species = ancombc(
-  data = pseq_Species, 
-  formula = "Response", 
-  p_adj_method = "fdr", 
-  lib_cut = 0, 
-  group = "Response", 
-  struc_zero = TRUE, 
-  neg_lb = TRUE, 
-  tol = 1e-5, 
-  max_iter = 100, 
-  conserve = TRUE, 
-  alpha = 0.05, 
-  global = TRUE
-)
-
-# Extract results for No_DC (which includes log fold changes for the comparison between DC and No_DC)
-res <- out_gg2_Species$res
-
-# Compute log fold change for DC vs No_DC
-results <- data.frame(
-  taxon = res$lfc$taxon,
-  log_fold_change = -res$lfc$ResponseNo_DC,
-  q_value = as.numeric(as.character(res$q_val$ResponseNo_DC)),
-  differentially_abundant = res$diff_abn$ResponseNo_DC
-)
-
-# Filter for significant results
-significant_results <- results[results$differentially_abundant == TRUE, ]
-significant_results <- significant_results[significant_results$q_value < 0.05,]
-significant_results <- significant_results[significant_results$log_fold_change < 0 | significant_results$log_fold_change > 0,]
-
-# Print the significant results
-print(significant_results)
-
-## Bar plot
-
-# Extract the row names and Species column from rowData(tse_rel)
-row_data <- rowData(tse_rel)
-row_names_to_Species <- data.frame(
-  row_name = rownames(row_data),
-  Species = row_data$Species
-)
-
-# Create a lookup table for easy matching
-lookup_table <- setNames(row_names_to_Species$Species, row_names_to_Species$row_name)
-
-# Replace values in the 'taxon' column of significant_results
-significant_results <- significant_results %>%
-  mutate(taxon = ifelse(taxon %in% names(lookup_table), 
-                        lookup_table[taxon], 
-                        taxon))
-
-# Add Response column based on log_fold_change direction
-significant_results$Response <- ifelse(significant_results$log_fold_change > 0, "DC", "No_DC")
-
-# Add Response column based on log_fold_change direction
-significant_results$Response <- ifelse(significant_results$log_fold_change > 0, "DC", "No_DC")
-
-# Assign colors based on Response only
-significant_results$highlight <- ifelse(significant_results$Response == "DC", "lightblue", "#FFC300")
-
-# Ensure 'highlight' is a factor
-significant_results$highlight <- factor(significant_results$highlight, 
-                                        levels = c("lightblue", "#FFC300"))
-
-# Create the bar plot with custom colors
-bar_plot <- ggplot(significant_results, aes(x = reorder(taxon, log_fold_change), y = log_fold_change, fill = highlight)) +
-  geom_bar(stat = "identity", show.legend = TRUE) +
-  scale_fill_manual(name = NULL,
-                    values = c("lightblue" = "lightblue", "#FFC300" = "#FFC300"),
-                    labels = c("lightblue" = "DC", 
-                               "#FFC300" = "No_DC")) +
-  coord_flip() +
-  labs(title = "Differential abundant species 
-            (16S rRNAseq)",, x = "Taxon", y = "Log Fold Change") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 18),
-        axis.title.y = element_text(size = 18),  
-        plot.title = element_text(size = 20, face = "bold", hjust = 0),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank()
-  ) +
-  guides(fill = guide_legend(title = ""))
-
-# Print the plot
-print(bar_plot)
-
-# Counts P. timonensis
-otu_table(pseq_Species)["Prevotella timonensis_A_3", ]
-
-
-
-
-
-
-
-
-
-
-
-
-
 ############ Shotgun metagenomics 
-
-
 # Load required packages
 library(qiime2R)
 library(mia)
@@ -356,7 +20,7 @@ library(devtools)
 
 
 ##TSE from Metaphlan
-tse_Metaphlan <- importMetaPhlAn("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 4/MetaPhlan/metaphlan_db_meta4_combined_reports.txt", "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 4/Puhti/metadata.tsv", package = "mia")
+tse_Metaphlan <- importMetaPhlAn("path/human_urine/Batch 4/MetaPhlan/metaphlan_db_meta4_combined_reports.txt", "path/human_urine/Batch 4/Puhti/metadata.tsv", package = "mia")
 
 # change MI_ID rownames of the tse, to our sample_ID
 col_data_Metaphlan <- colData(tse_Metaphlan)
@@ -1081,7 +745,7 @@ merged_data <- merge(metadata_df, as.data.frame(tse_assay), by.x = "row.names", 
 merged_data$Response <- factor(merged_data$Response, levels = c("DC", "No_DC"))
 
 # Directory to save the combined PDF
-output_dir <- "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS"
+output_dir <- "path/human_urine/RESULTS"
 output_pdf <- file.path(output_dir, "Wilcoxon_species_MetaPhlan4.pdf")
 
 
@@ -1203,7 +867,7 @@ dev.off()
 results_df$Adjusted_P <- p.adjust(results_df$P_value, method = "BH")
 
 # Write results to Excel
-write_xlsx(results_df, "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS/wilcoxon_barplots_species_MetaPhlan4.xlsx")
+write_xlsx(results_df, "path/human_urine/RESULTS/wilcoxon_barplots_species_MetaPhlan4.xlsx")
 
 
 
@@ -1242,7 +906,7 @@ merged_data <- merge(metadata_df, as.data.frame(tse_assay), by.x = "row.names", 
 merged_data$Response <- factor(merged_data$Response, levels = c("DC", "No_DC"))
 
 # Directory to save the combined PDF
-output_dir <- "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS"
+output_dir <- "path/human_urine/RESULTS"
 output_pdf <- file.path(output_dir, "Wilcoxon_species_MetaPhlan4.pdf")
 
 
@@ -1594,7 +1258,7 @@ ggplot(df_long, aes(x = Sample, y = Abundance, fill = color)) +
 
 
 # Write results to Excel
-write_xlsx(df_long, "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS/T563_shotgun_metagenomics/df_long_metaphlan.xlsx")
+write_xlsx(df_long, "path/human_urine/RESULTS/T563_shotgun_metagenomics/df_long_metaphlan.xlsx")
 
 
 
@@ -1991,7 +1655,7 @@ print(heatmap_plot)
 
 # HEATMAP all species
 ##TSE from GG2
-tse_GG2 <- importQIIME2("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/RESULTS_taxprofiler/Snakemake_GG2/counts.qza", taxonomy = "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/RESULTS_taxprofiler/Snakemake_GG2/taxonomy.qza", sampleMetaFile="Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/config/metadata_GG2.tsv")
+tse_GG2 <- importQIIME2("path/human_urine/Batch 2/Puhti/RESULTS_taxprofiler/Snakemake_GG2/counts.qza", taxonomy = "path/human_urine/Batch 2/Puhti/RESULTS_taxprofiler/Snakemake_GG2/taxonomy.qza", sampleMetaFile="path/human_urine/Batch 2/Puhti/config/metadata_GG2.tsv")
 # change rownames of the tse, to our sample_ID
 col_data_GG2 <- colData(tse_GG2)
 rownames(col_data_GG2) <- col_data_GG2$Patient_day
@@ -2244,11 +1908,11 @@ library(patchwork)
 
 # Gene family data
 # EC
-#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
+#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
 # KO
-#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
+#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
 # GO
-gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
+gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
 
 
 # --- Step 1: Set row names from first column and clean gene_family_data ---
@@ -2261,7 +1925,7 @@ colnames(gene_family_data) <- sapply(colnames(gene_family_data), extract_sample_
 
 # --- Step 2: Load metadata ---
 metadata <- read.table(
-  "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/puhti/metadata.tsv",
+  "path/human_urine/Batch 3/puhti/metadata.tsv",
   header = TRUE, sep = "\t", row.names = 1, check.names = FALSE
 )
 
@@ -2361,7 +2025,7 @@ print(plot_cc)
 
 
 write.xlsx(significant_results[, c("Feature", "pval")],
-           file = "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS/T563_shotgun_metagenomics/wilcoxon_kegg_results.xlsx",
+           file = "path/human_urine/RESULTS/T563_shotgun_metagenomics/wilcoxon_kegg_results.xlsx",
            row.names = FALSE)
 
 
@@ -2372,13 +2036,13 @@ write.xlsx(significant_results[, c("Feature", "pval")],
 
 # Gene family data
 # EC
-#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
+#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
 # KO
-#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
+#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
 # GO
-gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
+gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
 # MetaCyc (ERROR!)
-#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_MetaCyc_unstratified.txt", header = T)
+#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_MetaCyc_unstratified.txt", header = T)
 
 
 # Set row names from first column and remove that column
@@ -2391,7 +2055,7 @@ colnames(gene_family_data) <- sapply(colnames(gene_family_data), extract_sample_
 
 # --- Load metadata ---
 metadata <- read.table(
-  "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/puhti/metadata.tsv",
+  "path/human_urine/Batch 3/puhti/metadata.tsv",
   header = TRUE, sep = "\t", row.names = 1, check.names = FALSE
 )
 
@@ -2637,13 +2301,13 @@ ggplot(plot_data, aes(x = GeneRatio, y = Feature)) +
 ################ barplots 
 library(stringr)
 # EC
-#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
+#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
 # KO
-#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
+#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
 # GO
-gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
+gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
 # MetaCyc (ERROR!)
-#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_MetaCyc_unstratified.txt", header = T)
+#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_MetaCyc_unstratified.txt", header = T)
 
 
 # Set row names from first column and remove that column
@@ -2656,7 +2320,7 @@ colnames(gene_family_data) <- sapply(colnames(gene_family_data), extract_sample_
 
 # --- Load metadata ---
 metadata <- read.table(
-  "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/puhti/metadata_GG2.tsv",
+  "path/human_urine/Batch 3/puhti/metadata_GG2.tsv",
   header = TRUE, sep = "\t", row.names = 1, check.names = FALSE
 )
 
@@ -2818,11 +2482,11 @@ library(stringr)
 
 # Gene family data
 # EC
-#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
+#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
 # KO
-#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
+#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
 # GO
-gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
+gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
 
 
 # Set row names from first column and remove that column
@@ -2835,7 +2499,7 @@ colnames(gene_family_data) <- sapply(colnames(gene_family_data), extract_sample_
 
 # --- Load metadata ---
 metadata <- read.table(
-  "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/puhti/metadata_GG2.tsv",
+  "path/human_urine/Batch 3/puhti/metadata_GG2.tsv",
   header = TRUE, sep = "\t", row.names = 1, check.names = FALSE
 )
 
@@ -2931,7 +2595,7 @@ p_bp / p_mf / p_cc
 
 
 #write.xlsx(significant_results[, c("Feature", "pval")],
-#           file = "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS/T563_shotgun_metagenomics/wilcoxon_kegg_results.xlsx",
+#           file = "path/human_urine/RESULTS/T563_shotgun_metagenomics/wilcoxon_kegg_results.xlsx",
 #           row.names = FALSE)
 
 
@@ -2946,12 +2610,12 @@ library(tidyr)
 
 # Read data
 fixed_effect_df <- read_excel(
-  "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Fixed_effects.xlsx"
+  "path/human_urine/Fixed_effects.xlsx"
 )
 
 
 fixed_effect_df <- read_excel(
-  "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Fixed_effects.xlsx"
+  "path/human_urine/Fixed_effects.xlsx"
 ) %>%
   mutate(
     Patients = as.character(Patients),
