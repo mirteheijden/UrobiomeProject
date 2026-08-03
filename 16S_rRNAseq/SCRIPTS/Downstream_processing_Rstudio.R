@@ -1,0 +1,1559 @@
+## Tumor type differences
+
+# Then load
+library(TreeSummarizedExperiment)
+library(taxa)
+library(microbiome) # for transformations
+library(dplyr)
+library(readr)
+library(stringr)
+library(tidyverse)
+library(mia)
+library(qiime2R)
+library(miaViz)
+library(phyloseq)
+library(ggplot2)
+library(patchwork)
+library(ecodist)
+library(data.table)
+library(vegan)
+library(ggforce)
+library(RColorBrewer)
+library(readr)
+library(tibble)
+library(openxlsx)
+library(ggrepel)
+library(scater)
+library(reshape2)
+library(scales) 
+library(viridis) 
+library(forcats)  
+library(ggsignif)
+
+# Import data
+kraken2_data <- read_csv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/Kraken2_data_bacteria_only.csv")
+
+# Assign Taxonomic Ranks using lvl_type
+lvl_type_to_rank <- c(
+  R = "root", D = "domain", D1 = "domain", D2 = "domain",
+  K = "kingdom",
+  P = "phylum", P1 = "phylum",
+  C = "class", C1 = "class", C2 = "class",
+  O = "order", O1 = "order", O2 = "order",
+  F = "family", F1 = "family",
+  G = "genus", G1 = "genus",
+  S = "species",
+  U = "unclassified"
+)
+
+kraken2_data <- kraken2_data %>%
+  mutate(rank = lvl_type_to_rank[lvl_type])
+
+# Prepare the Counts Matrix
+counts <- kraken2_data[, grep("_all$", colnames(kraken2_data))]
+counts <- counts[, !grepl("^tot_", colnames(counts))]  # Exclude 'tot_' columns
+#colnames(counts) <- gsub("_all$", "", colnames(counts))  # Remove '_all' suffix
+
+# Make unique rownames using taxonomic prefix
+rownames(counts) <- paste0(
+  kraken2_data$rank, "__",
+  str_replace_all(kraken2_data$name, " ", "_"),
+  "_", seq_len(nrow(kraken2_data))
+)
+
+# Prepare Taxonomy (Row Data)
+taxonomy <- dplyr::select(kraken2_data, taxid, name, rank) %>%
+  dplyr::rename(name = name)
+
+# Include Metadata (Column Data)
+metadata <- read_tsv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/config/metadata.tsv")
+colnames_ordered <- colnames(counts)
+metadata <- metadata %>% arrange(match(kraken_id, colnames_ordered))
+
+# Create the TreeSummarizedExperiment Object
+tse <- TreeSummarizedExperiment(
+  assays = list(counts = as.matrix(counts)),
+  rowData = taxonomy,
+  colData = DataFrame(metadata)
+)
+
+
+### Adjust the lay-out for rowData(tse), so that it is accepted by tse codes
+# Extract the `rowData(tse)` as a dataframe
+taxonomy_df <- as.data.frame(rowData(tse))
+
+# Reshape the dataframe so that ranks are columns and taxid is the rowname
+reshaped_taxonomy <- taxonomy_df %>%
+  # Spread the data by rank
+  pivot_wider(names_from = rank, values_from = name, values_fn = list(name = first)) %>%
+  # Set taxid as rownames
+  column_to_rownames("taxid")
+
+# Assign the reshaped dataframe back to rowData(tse)
+rowData(tse) <- DataFrame(reshaped_taxonomy)
+
+# Check the result
+head(rowData(tse))
+
+
+
+
+
+
+
+## Differential abundance
+colData(tse)$Tumor_Group <- ifelse(
+  colData(tse)$Tumor_Type %in% c("Ovarian"),
+  "Ovarian",
+  "Other"
+)
+
+# -----------------------------
+# 1. Subset samples
+# -----------------------------
+tse_sub <- tse[, colData(tse)$Tumor_Group %in% c("Ovarian", "Other")]
+#tse_sub <- tse_sub[, rownames(subset(colData(tse_sub), Time == "day_1"))]
+
+# sanity check
+table(colData(tse_sub)$Tumor_Group)
+
+# -----------------------------
+# 2. Relative abundance
+# -----------------------------
+counts <- assay(tse_sub, "counts")
+
+relab <- sweep(counts, 2, colSums(counts), FUN = "/")
+relab[is.na(relab)] <- 0
+
+# -----------------------------
+# 3. Genus-level aggregation
+# -----------------------------
+tax <- rowData(tse_sub)$genus
+tax[is.na(tax) | tax == ""] <- "Unclassified"
+
+relab_genus <- rowsum(relab, group = tax)
+
+# -----------------------------
+# 4. Wilcoxon test
+# -----------------------------
+group <- factor(colData(tse_sub)$Tumor_Group, levels = c("Ovarian", "Other"))
+
+wilcox_df <- apply(relab_genus, 1, function(x) {
+  if (length(unique(group)) < 2) return(c(p_value = NA, logFC = NA))
+  
+  w <- wilcox.test(x ~ group, exact = FALSE)
+  
+  logFC <- log2(
+    (mean(x[group == "Ovarian"]) + 1e-6) /
+      (mean(x[group == "Other"]) + 1e-6)
+  )
+  
+  c(p_value = w$p.value, logFC = logFC)
+}) |> 
+  t() |> 
+  as.data.frame()
+
+wilcox_df$genus <- rownames(wilcox_df)
+wilcox_df$adj_p_value <- p.adjust(wilcox_df$p_value, method = "fdr")
+
+# -----------------------------
+# 5. Filter (REALISTIC cutoffs)
+# -----------------------------
+filtered_results <- wilcox_df |>
+  filter(p_value < 0.05, abs(logFC) > 0) |>
+  mutate(
+    Tumor_Group = ifelse(logFC > 0, "Ovarian", "Other"),
+    genus = gsub("^g__", "", genus)
+  ) |>
+  arrange(logFC)
+
+# -----------------------------
+# 6. Plot
+# -----------------------------
+bar_plot <- ggplot(filtered_results,
+                   aes(x = reorder(genus, logFC),
+                       y = logFC,
+                       fill = Tumor_Group)) +
+  geom_col() +
+  geom_hline(yintercept = 0, linewidth = 0.6) +
+  coord_flip() +
+  scale_fill_manual(values = c("Ovarian" = "#C2A3E0",
+                               "Other" = "#D4A017")) +
+  labs(
+    title = "Differentially abundant genera",
+    x = "",
+    y = "log2 Fold Change"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    axis.text.y = element_text(size = 12),
+    panel.grid = element_blank(),
+    legend.title = element_blank()
+  )
+
+print(bar_plot)
+
+# -----------------------------
+# 7. Export
+# -----------------------------
+write.xlsx(
+  filtered_results[, c("genus", "logFC", "p_value", "adj_p_value")],
+  file = "Ovarian_wilcoxon_significant_genus.xlsx",
+  row.names = FALSE
+)
+
+
+
+
+
+
+
+
+
+### Bacteria specific plots   -- GENUS
+
+# Import data
+kraken2_data <- read_csv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/Kraken2_data_bacteria_only.csv")
+
+# Assign Taxonomic Ranks using lvl_type
+lvl_type_to_rank <- c(
+  R = "root", D = "domain", D1 = "domain", D2 = "domain",
+  K = "kingdom",
+  P = "phylum", P1 = "phylum",
+  C = "class", C1 = "class", C2 = "class",
+  O = "order", O1 = "order", O2 = "order",
+  F = "family", F1 = "family",
+  G = "genus", G1 = "genus",
+  S = "species",
+  U = "unclassified"
+)
+
+kraken2_data <- kraken2_data %>%
+  mutate(rank = lvl_type_to_rank[lvl_type])
+
+# Prepare the Counts Matrix
+counts <- kraken2_data[, grep("_all$", colnames(kraken2_data))]
+counts <- counts[, !grepl("^tot_", colnames(counts))]  # Exclude 'tot_' columns
+#colnames(counts) <- gsub("_all$", "", colnames(counts))  # Remove '_all' suffix
+
+# Make unique rownames using taxonomic prefix
+rownames(counts) <- paste0(
+  kraken2_data$rank, "__",
+  str_replace_all(kraken2_data$name, " ", "_"),
+  "_", seq_len(nrow(kraken2_data))
+)
+
+# Prepare Taxonomy (Row Data)
+taxonomy <- dplyr::select(kraken2_data, taxid, name, rank) %>%
+  dplyr::rename(name = name)
+
+# Include Metadata (Column Data)
+metadata <- read_tsv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/config/metadata.tsv")
+colnames_ordered <- colnames(counts)
+metadata <- metadata %>% arrange(match(kraken_id, colnames_ordered))
+
+# Create the TreeSummarizedExperiment Object
+tse <- TreeSummarizedExperiment(
+  assays = list(counts = as.matrix(counts)),
+  rowData = taxonomy,
+  colData = DataFrame(metadata)
+)
+
+
+
+
+### Adjust the lay-out for rowData(tse), so that it is accepted by tse codes
+# Extract the `rowData(tse)` as a dataframe
+taxonomy_df <- as.data.frame(rowData(tse))
+
+# Reshape the dataframe so that ranks are columns and taxid is the rowname
+reshaped_taxonomy <- taxonomy_df %>%
+  # Spread the data by rank
+  pivot_wider(names_from = rank, values_from = name, values_fn = list(name = first)) %>%
+  # Set taxid as rownames
+  column_to_rownames("taxid")
+
+# Assign the reshaped dataframe back to rowData(tse)
+rowData(tse) <- DataFrame(reshaped_taxonomy)
+
+# Check the result
+head(rowData(tse))
+
+
+## Differential abundance
+colData(tse)$Tumor_Group <- ifelse(
+  colData(tse)$Tumor_Type %in% c("Ovarian"),
+  "Ovarian",
+  "Other"
+)
+
+
+#tse <- tse[, rownames(subset(colData(tse), Time == "day_1"))]
+tse_rel <- transformAssay(tse, assay.type = "counts", method = "relabundance")
+colSums(assay(tse_rel, "relabundance"))
+
+# correct order for your available ranks
+correct_order <- c("domain", "kingdom", "phylum", "class", "order", "family", "genus")
+
+# reorder taxonomy columns
+rowData(tse_rel) <- rowData(tse_rel)[, correct_order]
+
+tse_combined <- mergeFeaturesByRank(
+  tse_rel,
+  rank = "genus",
+  onRankOnly = TRUE
+)
+
+tse_filtered <- tse_combined
+
+# Extract bacteria
+bacterium_name <- "Staphylococcus"
+
+bacteria_tse <- tse_filtered[rowData(tse_filtered)$genus == bacterium_name, ]
+
+stopifnot(nrow(bacteria_tse) == 1)
+
+df_box <- as.data.frame(
+  t(assay(bacteria_tse, "relabundance"))
+)
+
+colnames(df_box) <- "Bacteria"
+
+df_box <- df_box %>%
+  rownames_to_column("SampleID") %>%
+  mutate(
+    Tumor_Group = colData(bacteria_tse)$Tumor_Group,
+    Patient  = colData(bacteria_tse)$Patient
+  )
+
+# Ensure order
+df_box$Tumor_Group <- factor(df_box$Tumor_Group, levels = c("Ovarian", "Other"))
+
+library(ggplot2)
+library(ggsignif)
+
+boxplot <- ggplot(df_box, aes(x = Tumor_Group, y = Bacteria)) +
+  
+  geom_boxplot(
+    aes(fill = Tumor_Group),
+    color = "black",
+    width = 0.3,
+    outlier.shape = NA
+  ) +
+  
+  geom_point(
+    aes(color = Tumor_Group),
+    position = position_jitter(width = 0.1, height = 0),
+    alpha = 0.7,
+    size = 2
+  ) +
+  
+  
+  geom_text_repel(
+    aes(label = NA, color = Tumor_Group),
+    position = position_jitter(width = 0.1),
+    size = 4,
+    box.padding = 0.4,
+    max.overlaps = Inf
+  ) +
+  
+  labs(
+    x = NULL,
+    y = "Relative abundance",
+    title = paste0(bacterium_name)
+  ) +
+  
+  scale_fill_manual(values = c("Ovarian" = "pink", "Other" = "lightblue")) +
+  scale_color_manual(values = c("Ovarian" = "purple", "Other" = "darkblue")) +
+  
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "plain", size = 18, hjust = 0.5, margin = margin(b = 10)),
+    plot.title.position = "plot",
+    axis.title.y = element_text(size = 16, margin = margin(r = 10)),
+    axis.text = element_text(size = 14),
+    axis.text.x = element_text(color = "black", size = 14),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    plot.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black", size = 0.6)
+  )
+
+# significance
+boxplot <- boxplot +
+  geom_signif(
+    comparisons = list(c("Ovarian", "Other")),
+    test = wilcox.test,
+    map_signif_level = function(p) paste0("p = ", signif(p, 3)),
+    step_increase = 0.1,
+    color = "black",
+    size = 0.7,
+    textsize = 4
+  )
+
+print(boxplot)
+
+
+
+
+
+
+
+
+
+# alpha-diversity (Shannon) - Genus
+kraken2_data <- read_csv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/Kraken2_data_bacteria_only.csv")
+
+# Assign Taxonomic Ranks using lvl_type
+lvl_type_to_rank <- c(
+  R = "root", D = "domain", D1 = "domain", D2 = "domain",
+  K = "kingdom",
+  P = "phylum", P1 = "phylum",
+  C = "class", C1 = "class", C2 = "class",
+  O = "order", O1 = "order", O2 = "order",
+  F = "family", F1 = "family",
+  G = "genus", G1 = "genus",
+  S = "species",
+  U = "unclassified"
+)
+
+kraken2_data <- kraken2_data %>%
+  mutate(rank = lvl_type_to_rank[lvl_type])
+
+# Prepare the Counts Matrix
+counts <- kraken2_data[, grep("_all$", colnames(kraken2_data))]
+counts <- counts[, !grepl("^tot_", colnames(counts))]  # Exclude 'tot_' columns
+#colnames(counts) <- gsub("_all$", "", colnames(counts))  # Remove '_all' suffix
+
+# Make unique rownames using taxonomic prefix
+rownames(counts) <- paste0(
+  kraken2_data$rank, "__",
+  str_replace_all(kraken2_data$name, " ", "_"),
+  "_", seq_len(nrow(kraken2_data))
+)
+
+# Prepare Taxonomy (Row Data)
+taxonomy <- dplyr::select(kraken2_data, taxid, name, rank) %>%
+  dplyr::rename(name = name)
+
+# Include Metadata (Column Data)
+metadata <- read_tsv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/config/metadata.tsv")
+colnames_ordered <- colnames(counts)
+metadata <- metadata %>% arrange(match(id, colnames_ordered))
+
+# Create the TreeSummarizedExperiment Object
+tse <- TreeSummarizedExperiment(
+  assays = list(counts = as.matrix(counts)),
+  rowData = taxonomy,
+  colData = DataFrame(metadata)
+)
+
+
+
+
+### Adjust the lay-out for rowData(tse), so that it is accepted by tse codes
+# Extract the `rowData(tse)` as a dataframe
+taxonomy_df <- as.data.frame(rowData(tse))
+
+# Reshape the dataframe so that ranks are columns and taxid is the rowname
+reshaped_taxonomy <- taxonomy_df %>%
+  # Spread the data by rank
+  pivot_wider(names_from = rank, values_from = name, values_fn = list(name = first)) %>%
+  # Set taxid as rownames
+  column_to_rownames("taxid")
+
+# Assign the reshaped dataframe back to rowData(tse)
+rowData(tse) <- DataFrame(reshaped_taxonomy)
+
+# Check the result
+head(rowData(tse))
+
+
+## Differential abundance
+colData(tse)$Tumor_Group <- ifelse(
+  colData(tse)$Tumor_Type %in% c("Ovarian"),
+  "Ovarian",
+  "Other"
+)
+
+
+#tse <- tse[, rownames(subset(colData(tse), Time == "day_1"))]
+tse_rel <- transformAssay(tse, assay.type = "counts", method = "relabundance")
+colSums(assay(tse_rel, "relabundance"))
+
+# correct order for your available ranks
+correct_order <- c("domain", "kingdom", "phylum", "class", "order", "family", "genus")
+
+# reorder taxonomy columns
+rowData(tse_rel) <- rowData(tse_rel)[, correct_order]
+
+tse_genus <- mergeFeaturesByRank(
+  tse_rel,
+  rank = "genus",
+  onRankOnly = TRUE
+)
+
+# Estimate (observed) richness
+tse_genus <- addAlpha(
+  tse_genus, assay.type = "relabundance", index = "shannon", name = "observed",
+  detection = 10)
+
+# Check some of the first values in colData
+head(tse_genus$observed)
+
+# Set the specific order for the Patient factor levels
+colData(tse_genus)$Patient_day <- factor(
+  colData(tse_genus)$Patient_day,
+  levels = unique(colData(tse_genus)$Patient_day[colData(tse_genus)$Tumor_Group == "Ovarian"]) %>%
+    c(unique(colData(tse_genus)$Patient_day[colData(tse_genus)$Tumor_Group == "Other"]))
+)
+
+# Plot
+plotColData(
+  tse_genus,
+  y = "observed",
+  x = "Patient_day",
+  colour_by = "Tumor_Group",
+  show_violin = FALSE,   # turn off violin layer
+  show_median = FALSE,   # turn off median line
+) +
+  theme(
+    title = element_text(size = 10),
+    plot.title = element_text(face = "plain", size = 18),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.title = element_text(face = "bold", size = 14),
+    legend.text = element_text(size = 14),
+    panel.border = element_blank(),
+    panel.grid = element_blank(),
+    panel.background = element_blank(),
+    axis.line = element_line(color = "black", size = 0.8)
+  ) +
+  labs(
+    x = "Patient_day",
+    y = "Richness",
+    colour = "Tumor_Group",
+    title = "Alpha Diversity"
+  ) +
+  scale_color_manual(values = c("Ovarian" = "#D4A017", "Other" = "#C2A3E0"))
+
+# Boxplot 
+
+# Build the plotting data
+df_alpha <- as.data.frame(S4Vectors::DataFrame(colData(tse_genus))) %>%
+  dplyr::select(Tumor_Group, observed) %>%
+  dplyr::filter(!is.na(Tumor_Group), !is.na(observed)) %>%
+  dplyr::mutate(
+    Tumor_Group = factor(Tumor_Group, levels = c("Ovarian", "Other"))
+  )
+
+# Optional: check group sizes
+# print(table(df_alpha$Tumor_Group))
+
+# Create the boxplot (styled like your example)
+boxplot_alpha <- ggplot(df_alpha, aes(x = Tumor_Group, y = observed)) +
+  
+  geom_boxplot(
+    aes(fill = Tumor_Group),
+    color = "black",
+    width = 0.3,
+    outlier.shape = NA
+  ) +
+  
+  geom_point(
+    aes(color = Tumor_Group),
+    position = position_jitter(width = 0.1, height = 0),
+    alpha = 0.7,
+    size = 2
+  ) +
+  
+  labs(
+    x = NULL,
+    y = "Richness",
+    title = "Alpha diversity (Shannon)"
+  ) +
+  
+  # Manual colors (match your palette style)
+  scale_fill_manual(values = c("Ovarian" = "#D4A017", "Other" = "#C2A3E0")) +
+  scale_color_manual(values = c("Ovarian" = "#B88E14", "Other" = "#9B88C0")) +
+  
+  # Add some headroom above the boxes for the significance bar/text
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+  
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5, margin = margin(b = 10)),
+    plot.title.position = "plot",
+    axis.title.y = element_text(size = 16, margin = margin(r = 10)),
+    axis.text = element_text(size = 14),
+    axis.text.x = element_text(color = "black", size = 14),
+    legend.position = "none",  # like your example
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    plot.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black", linewidth = 0.6)
+  )
+
+# --- Significance with Wilcoxon (geom_signif) ---
+# The bracket and the p-value will be added above the boxes.
+# You can tweak 'step_increase' to move the bracket up if it overlaps.
+boxplot_alpha <- boxplot_alpha +
+  geom_signif(
+    comparisons = list(c("Ovarian", "Other")),
+    test = "wilcox.test",
+    map_signif_level = function(p) paste0("p = ", signif(p, 3)),
+    step_increase = 0.12,  # increase if the text/bar touches the box
+    color = "black",
+    size = 0.7,
+    textsize = 4
+  )
+
+print(boxplot_alpha)
+
+
+
+
+# Beta-diversity (Bray curtis)
+kraken2_data <- read_csv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/Kraken2_data_bacteria_only.csv")
+
+# Assign Taxonomic Ranks using lvl_type
+lvl_type_to_rank <- c(
+  R = "root", D = "domain", D1 = "domain", D2 = "domain",
+  K = "kingdom",
+  P = "phylum", P1 = "phylum",
+  C = "class", C1 = "class", C2 = "class",
+  O = "order", O1 = "order", O2 = "order",
+  F = "family", F1 = "family",
+  G = "genus", G1 = "genus",
+  S = "species",
+  U = "unclassified"
+)
+
+kraken2_data <- kraken2_data %>%
+  mutate(rank = lvl_type_to_rank[lvl_type])
+
+# Prepare the Counts Matrix
+counts <- kraken2_data[, grep("_all$", colnames(kraken2_data))]
+counts <- counts[, !grepl("^tot_", colnames(counts))]  # Exclude 'tot_' columns
+#colnames(counts) <- gsub("_all$", "", colnames(counts))  # Remove '_all' suffix
+
+# Make unique rownames using taxonomic prefix
+rownames(counts) <- paste0(
+  kraken2_data$rank, "__",
+  str_replace_all(kraken2_data$name, " ", "_"),
+  "_", seq_len(nrow(kraken2_data))
+)
+
+# Prepare Taxonomy (Row Data)
+taxonomy <- dplyr::select(kraken2_data, taxid, name, rank) %>%
+  dplyr::rename(name = name)
+
+# Include Metadata (Column Data)
+metadata <- read_tsv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/config/metadata.tsv")
+colnames_ordered <- colnames(counts)
+metadata <- metadata %>% arrange(match(kraken_id, colnames_ordered))
+
+# Create the TreeSummarizedExperiment Object
+tse <- TreeSummarizedExperiment(
+  assays = list(counts = as.matrix(counts)),
+  rowData = taxonomy,
+  colData = DataFrame(metadata)
+)
+
+
+
+
+### Adjust the lay-out for rowData(tse), so that it is accepted by tse codes
+# Extract the `rowData(tse)` as a dataframe
+taxonomy_df <- as.data.frame(rowData(tse))
+
+# Reshape the dataframe so that ranks are columns and taxid is the rowname
+reshaped_taxonomy <- taxonomy_df %>%
+  # Spread the data by rank
+  pivot_wider(names_from = rank, values_from = name, values_fn = list(name = first)) %>%
+  # Set taxid as rownames
+  column_to_rownames("taxid")
+
+# Assign the reshaped dataframe back to rowData(tse)
+rowData(tse) <- DataFrame(reshaped_taxonomy)
+
+# Check the result
+head(rowData(tse))
+
+
+## Differential abundance
+colData(tse)$Tumor_Group <- ifelse(
+  colData(tse)$Tumor_Type %in% c("Ovarian"),
+  "Ovarian",
+  "Other"
+)
+
+
+#tse <- tse[, rownames(subset(colData(tse), Time == "day_1"))]
+tse_rel <- transformAssay(tse, assay.type = "counts", method = "relabundance")
+colSums(assay(tse_rel, "relabundance"))
+
+# correct order for your available ranks
+correct_order <- c("domain", "kingdom", "phylum", "class", "order", "family", "genus")
+
+# reorder taxonomy columns
+rowData(tse_rel) <- rowData(tse_rel)[, correct_order]
+
+tse_genus <- mergeFeaturesByRank(
+  tse_rel,
+  rank = "genus",
+  onRankOnly = TRUE
+)
+
+#print(assay_names)
+tse_genus_abund_assay <- assays(tse_genus)$relabundance
+bray_curtis_dist <- vegan::vegdist(t(tse_genus_abund_assay), method = "bray")
+#install.packages("ecodist")
+library(ecodist)
+bray_curtis_pcoa <- ecodist::pco(bray_curtis_dist)
+#PCoA1 and PCoA2
+bray_curtis_pcoa_df <- data.frame(pcoa1 = bray_curtis_pcoa$vectors[,1], 
+                                  pcoa2 = bray_curtis_pcoa$vectors[,2])
+# Create a plot
+# Adds the variable you want to use for coloring to the data frame
+bray_curtis_RECIST_pcoa_df <- cbind(bray_curtis_pcoa_df,
+                                    Tumor_Group = colData(tse_genus)$Tumor_Group,
+                                    label = NA)
+#label = colData(tse_genus)$Patient_day)
+
+
+# For DC vs No_DC
+bray_curtis_plot <- ggplot(data = bray_curtis_RECIST_pcoa_df, 
+                           aes(x = pcoa1, y = pcoa2, color = Tumor_Group, shape = Tumor_Group)) +
+  geom_point(size = 3) +  # Points for each sample
+  geom_text(aes(label = label), size = 3, vjust = 1.5, show.legend = FALSE) +  # Labels for each point (Patient names)
+  
+  # Add circles around the groups with colored outlines and no fill
+  geom_mark_ellipse(aes(group = Tumor_Group), 
+                    fill = NA,  # No fill
+                    linetype = "solid",  # Outline type
+                    show.legend = FALSE) +  # Hide legend for the ellipses
+  
+  labs(x = "PC1",
+       y = "PC2", 
+       title = "Beta diversity between groups") +
+  theme_bw() + #white background
+  theme(
+    title = element_text(size = 10),
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+    axis.text.x = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    legend.title = element_text(face = "bold", size = 14),
+    legend.text = element_text(size = 14),
+    text = element_text(size = 12),
+    
+    # Background and border tweaks
+    panel.border = element_blank(),
+    panel.grid = element_blank(),
+    panel.background = element_blank(),
+    
+    # Add axis lines with thickness
+    axis.line = element_line(color = "black", size = 0.4)
+  ) +
+  scale_color_manual(values = c("Ovarian" = "#D4A017", "Other" = "#C2A3E0")) + # Define custom colors
+  # Zoom out a bit: extend axes limits
+  expand_limits(x = c(min(bray_curtis_RECIST_pcoa_df$pcoa1) - 0.1, 
+                      max(bray_curtis_RECIST_pcoa_df$pcoa1) + 0.22),
+                y = c(min(bray_curtis_RECIST_pcoa_df$pcoa2) - 0.1, 
+                      max(bray_curtis_RECIST_pcoa_df$pcoa2) + 0.1))
+
+
+# Display the plot
+bray_curtis_plot
+
+
+
+
+### Venn Diagrams
+#install.packages("ggVennDiagram")
+library(ggVennDiagram)
+
+
+
+kraken2_data <- read_csv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/Kraken2_data_bacteria_only.csv")
+
+# Assign Taxonomic Ranks using lvl_type
+lvl_type_to_rank <- c(
+  R = "root", D = "domain", D1 = "domain", D2 = "domain",
+  K = "kingdom",
+  P = "phylum", P1 = "phylum",
+  C = "class", C1 = "class", C2 = "class",
+  O = "order", O1 = "order", O2 = "order",
+  F = "family", F1 = "family",
+  G = "genus", G1 = "genus",
+  S = "species",
+  U = "unclassified"
+)
+
+kraken2_data <- kraken2_data %>%
+  mutate(rank = lvl_type_to_rank[lvl_type])
+
+# Prepare the Counts Matrix
+counts <- kraken2_data[, grep("_all$", colnames(kraken2_data))]
+counts <- counts[, !grepl("^tot_", colnames(counts))]  # Exclude 'tot_' columns
+#colnames(counts) <- gsub("_all$", "", colnames(counts))  # Remove '_all' suffix
+
+# Make unique rownames using taxonomic prefix
+rownames(counts) <- paste0(
+  kraken2_data$rank, "__",
+  str_replace_all(kraken2_data$name, " ", "_"),
+  "_", seq_len(nrow(kraken2_data))
+)
+
+# Prepare Taxonomy (Row Data)
+taxonomy <- dplyr::select(kraken2_data, taxid, name, rank) %>%
+  dplyr::rename(name = name)
+
+# Include Metadata (Column Data)
+metadata <- read_tsv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/config/metadata.tsv")
+colnames_ordered <- colnames(counts)
+metadata <- metadata %>% arrange(match(kraken_id, colnames_ordered))
+
+# Create the TreeSummarizedExperiment Object
+tse <- TreeSummarizedExperiment(
+  assays = list(counts = as.matrix(counts)),
+  rowData = taxonomy,
+  colData = DataFrame(metadata)
+)
+
+
+
+
+### Adjust the lay-out for rowData(tse), so that it is accepted by tse codes
+# Extract the `rowData(tse)` as a dataframe
+taxonomy_df <- as.data.frame(rowData(tse))
+
+# Reshape the dataframe so that ranks are columns and taxid is the rowname
+reshaped_taxonomy <- taxonomy_df %>%
+  # Spread the data by rank
+  pivot_wider(names_from = rank, values_from = name, values_fn = list(name = first)) %>%
+  # Set taxid as rownames
+  column_to_rownames("taxid")
+
+# Assign the reshaped dataframe back to rowData(tse)
+rowData(tse) <- DataFrame(reshaped_taxonomy)
+
+# Check the result
+head(rowData(tse))
+
+
+## Differential abundance
+colData(tse)$Tumor_Group <- ifelse(
+  colData(tse)$Tumor_Type %in% c("Ovarian"),
+  "Ovarian",
+  "Other"
+)
+
+
+#tse <- tse[, rownames(subset(colData(tse), Time == "day_1"))]
+tse_rel <- transformAssay(tse, assay.type = "counts", method = "relabundance")
+colSums(assay(tse_rel, "relabundance"))
+
+# correct order for your available ranks
+correct_order <- c("domain", "kingdom", "phylum", "class", "order", "family", "genus")
+
+# reorder taxonomy columns
+rowData(tse_rel) <- rowData(tse_rel)[, correct_order]
+
+tse_genus <- mergeFeaturesByRank(
+  tse_rel,
+  rank = "genus",
+  onRankOnly = TRUE
+)
+
+
+# Function to filter genera present in at least 4 samples
+filter_genus <- function(tse_genus) {
+  genus_counts <- rowSums(assay(tse_genus) > 0)  # Count non-zero occurrences
+  tse_genus_filtered <- tse_genus[genus_counts >= 4, ]  # Keep genera in ≥4 samples
+  return(tse_genus_filtered)
+}
+
+# Apply filtering
+Other_rel <- filter_genus(tse_genus[, rownames(subset(colData(tse_genus), Tumor_Group == "Other"))])
+Ovarian_rel <- filter_genus(tse_genus[, rownames(subset(colData(tse_genus), Tumor_Group == "Ovarian"))])
+
+# Extract unique genus names from each group
+genus_other <- unique(rowData(Other_rel)$genus)
+genus_ovarian <- unique(rowData(Ovarian_rel)$genus)
+
+# Find overlapping genera
+overlapping_genus <- intersect(genus_other, genus_ovarian)
+
+# Create a list for ggVennDiagram
+venn_list <- list(Other = genus_other, Ovarian = genus_ovarian)
+
+set.seed(20231214)
+
+# Generate and display the Venn diagram with improved colors and larger text
+ggVennDiagram(venn_list, label_alpha = 0, label_size = 8) +  # Increase text size
+  scale_fill_gradient(low = "#D4A017", high = "#C2A3E0") +  # Softer colors
+  theme_void() +  # Remove grid/background
+  theme(
+    plot.margin = margin(10, 10, 10, 10),  # Adjust margins
+    legend.position = "none",  # Hide unnecessary legend
+    text = element_text(size = 16, face = "bold"),  # Increase overall text size & bold
+    plot.title = element_text(hjust = 0.50)
+  ) +
+  labs(title = "Baseline") +
+  coord_flip()  # Flip the layout to horizontal
+
+# Print genera
+# Find exclusive genera
+only_other_genus <- setdiff(genus_other, overlapping_genus)   # Genera only in "Other"
+only_ovarian_genus <- setdiff(genus_ovarian, overlapping_genus)  # Genera only in "Ovarian"
+
+# Sort the results alphabetically
+overlapping_genus <- sort(overlapping_genus)
+only_other_genus <- sort(only_other_genus)
+only_ovarian_genus <- sort(only_ovarian_genus)
+
+# View results
+View(as.data.frame(overlapping_genus))  # Genera present in both
+View(as.data.frame(only_other_genus))         # Genera only in "Other"
+View(as.data.frame(only_ovarian_genus))       # Genera only in "Ovarian"
+
+#Save in Excel
+
+library(openxlsx)
+
+# Convert to vectors
+other <- as.character(only_other_genus)
+ovarian <- as.character(only_ovarian_genus)
+overlapping <- as.character(overlapping_genus)
+
+# Pad with NA to make equal length
+max_len <- max(length(other), length(ovarian), length(overlapping))
+
+pad <- function(x) c(x, rep(NA, max_len - length(x)))
+
+df <- data.frame(
+  Other = pad(other),
+  Ovarian = pad(ovarian),
+  Overlapping = pad(overlapping)
+)
+
+# Save to Excel
+write.xlsx(df, file = "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS/genus_comparison.xlsx", overwrite = TRUE)
+
+# Number of samples used for Venn Diagram
+table(colData(tse_genus)$Tumor_Group)
+
+
+
+## Taxonomic barplots
+
+# Phylum
+
+# --- Load Kraken2 table and map ranks ---
+kraken2_data <- read_csv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/Kraken2_data_bacteria_only.csv")
+
+lvl_type_to_rank <- c(
+  R="root", D="domain", D1="domain", D2="domain",
+  K="kingdom",
+  P="phylum", P1="phylum",
+  C="class", C1="class", C2="class",
+  O="order", O1="order", O2="order",
+  F="family", F1="family",
+  G="genus", G1="genus",
+  S="species",
+  U="unclassified"
+)
+
+kraken2_data <- kraken2_data %>%
+  mutate(rank = lvl_type_to_rank[lvl_type])
+
+# --- Build counts matrix ---
+counts <- kraken2_data[, grep("_all$", colnames(kraken2_data))]
+counts <- counts[, !grepl("^tot_", colnames(counts))]
+
+rownames(counts) <- paste0(
+  kraken2_data$rank, "__",
+  gsub(" ", "_", kraken2_data$name), "_",
+  seq_len(nrow(kraken2_data))
+)
+
+# --- Row data ---
+taxonomy <- kraken2_data %>%
+  select(taxid, name, rank)
+
+# --- Metadata aligned to count columns ---
+metadata <- read_tsv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/config/metadata.tsv")
+metadata <- metadata %>% arrange(match(kraken_id, colnames(counts)))
+
+# --- Create TSE ---
+tse <- TreeSummarizedExperiment(
+  assays = list(counts = as.matrix(counts)),
+  rowData = taxonomy,
+  colData = DataFrame(metadata)
+)
+
+# =============================
+# ✅ SINGLE CORRECT RESHAPE
+# =============================
+taxonomy_df <- as.data.frame(rowData(tse))
+
+reshaped <- taxonomy_df %>%
+  pivot_wider(
+    names_from = rank,
+    values_from = name,
+    values_fn = list(name = dplyr::first)
+  ) %>%
+  column_to_rownames("taxid")
+
+rowData(tse) <- DataFrame(reshaped)
+
+# --- Correct rank column order ---
+correct_order <- c("domain", "kingdom", "phylum", "class", "order", "family", "genus")
+rowData(tse) <- rowData(tse)[, intersect(correct_order, colnames(rowData(tse)))]
+
+# =====================================================
+# PHYLUM AGGLOMERATION & RELATIVE ABUNDANCE
+# =====================================================
+
+#tse <- tse[, rownames(subset(colData(tse), Time == "day_1"))]
+#tse <- tse[, rownames(subset(colData(tse), Tumor_Type == "Ovarian"))]
+tse <- tse[, rownames(subset(colData(tse), Tumor_Type != "Ovarian"))]
+tse_spec <- agglomerateByRank(tse, rank = "phylum", onRankOnly = TRUE)
+tse_rel  <- transformAssay(tse_spec, assay.type = "counts", method = "relabundance")
+
+# --- Define "Other" phyla (<0.1% mean abundance) ---
+phylum_means <- rowMeans(assay(tse_rel, "relabundance"))
+rowData(tse_rel)$phylum <- ifelse(phylum_means >= 0.001,
+                                  rowData(tse_rel)$phylum,
+                                  "Other")
+
+# Merge small phyla
+tse_combined <- mergeFeaturesByRank(
+  tse_rel,
+  rank = "phylum",
+  onRankOnly = TRUE
+)
+
+# Drop zero rows
+keep <- rowSums(assay(tse_combined, "relabundance")) > 0
+tse_filtered <- tse_combined[keep, ]
+
+# Update column names to Patient_day_inj
+cd <- colData(tse_combined)
+rownames(cd) <- cd$Patient_day_inj
+colData(tse_combined) <- cd
+
+# Remove the "Other" row for plotting
+tse_filtered <- tse_combined[rowData(tse_combined)$phylum != "Other", ]
+
+# =====================================================
+# PLOT
+# =====================================================
+
+# Build an ordering key and factor it by Tumor_Type -> Patient
+cd <- as.data.frame(colData(tse_combined))
+stopifnot(all(c("Tumor_Type", "Patient_day") %in% colnames(cd)))
+
+# Key for sorting and for readable labels if you want
+cd$Tumor_Patient <- paste0(cd$Tumor_Type, "_", cd$Patient_day)
+
+# Compute the multi-criteria order
+ord <- order(cd$Tumor_Type, cd$Patient_day, na.last = TRUE)
+
+# Make Tumor_Patient an ordered factor according to ord
+cd$Tumor_Patient <- factor(cd$Tumor_Patient, levels = cd$Tumor_Patient[ord], ordered = TRUE)
+
+# Write back to colData
+colData(tse_combined) <- S4Vectors::DataFrame(cd)
+
+# Change rownames of the colData to the Patient ID
+col_data_tse <- colData(tse_combined)
+rownames(col_data_tse) <- col_data_tse$Tumor_Patient
+colData(tse_combined) <- col_data_tse
+
+# Filter out the "Other"  from rowData
+tse_combined <- tse_combined[rowData(tse_combined)$phylum != "Other", ]
+
+# Now tell plotAbundance to order columns by this **column name**
+plotAbundance(
+  tse_combined,
+  rank = "phylum",
+  assay.type = "relabundance",
+  order.row.by = "abund",
+  order.col.by = "Tumor_Type",  # or your chosen colData key
+  add_x_text = TRUE
+) +
+  theme(
+    plot.title = element_text(face = "bold", size = 18),
+    axis.text.x = element_text(angle = 55, hjust = 1, size = 12),
+    axis.title.y = element_text(size = 14),
+    legend.title = element_text(face = "bold", size = 14),
+    legend.text = element_text(size = 14)
+  ) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1), expand = c(0, 0)) +
+  labs(title = "Other Cancer Types", x = "", y = "Rel. Abundance (%)") +
+  scale_fill_viridis_d(option = "C") +
+  labs(fill = "Phylum", colour = NULL) +
+  guides(
+    colour = "none",
+    size = "none",
+    shape = "none",
+    linetype = "none",
+    alpha = "none"
+  )
+
+
+
+
+
+
+
+
+# genus
+
+# --- Load Kraken2 table and map ranks ---
+kraken2_data <- read_csv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/Kraken2_data_bacteria_only.csv")
+
+lvl_type_to_rank <- c(
+  R="root", D="domain", D1="domain", D2="domain",
+  K="kingdom",
+  P="phylum", P1="phylum",
+  C="class", C1="class", C2="class",
+  O="order", O1="order", O2="order",
+  F="family", F1="family",
+  G="genus", G1="genus",
+  S="species",
+  U="unclassified"
+)
+
+kraken2_data <- kraken2_data %>%
+  mutate(rank = lvl_type_to_rank[lvl_type])
+
+# --- Build counts matrix ---
+counts <- kraken2_data[, grep("_all$", colnames(kraken2_data))]
+counts <- counts[, !grepl("^tot_", colnames(counts))]
+
+rownames(counts) <- paste0(
+  kraken2_data$rank, "__",
+  gsub(" ", "_", kraken2_data$name), "_",
+  seq_len(nrow(kraken2_data))
+)
+
+# --- Row data ---
+taxonomy <- kraken2_data %>%
+  select(taxid, name, rank)
+
+# --- Metadata aligned to count columns ---
+metadata <- read_tsv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/config/metadata.tsv")
+metadata <- metadata %>% arrange(match(kraken_id, colnames(counts)))
+
+# --- Create TSE ---
+tse <- TreeSummarizedExperiment(
+  assays = list(counts = as.matrix(counts)),
+  rowData = taxonomy,
+  colData = DataFrame(metadata)
+)
+
+# =============================
+# ✅ SINGLE CORRECT RESHAPE
+# =============================
+taxonomy_df <- as.data.frame(rowData(tse))
+
+reshaped <- taxonomy_df %>%
+  pivot_wider(
+    names_from = rank,
+    values_from = name,
+    values_fn = list(name = dplyr::first)
+  ) %>%
+  column_to_rownames("taxid")
+
+rowData(tse) <- DataFrame(reshaped)
+
+# --- Correct rank column order ---
+correct_order <- c("domain", "kingdom", "phylum", "class", "order", "family", "genus")
+rowData(tse) <- rowData(tse)[, intersect(correct_order, colnames(rowData(tse)))]
+
+# =====================================================
+# genus AGGLOMERATION & RELATIVE ABUNDANCE
+# =====================================================
+
+#tse <- tse[, rownames(subset(colData(tse), Time == "day_1"))]
+#tse <- tse[, rownames(subset(colData(tse), Tumor_Type == "Ovarian"))]
+tse <- tse[, rownames(subset(colData(tse), Tumor_Type != "Ovarian"))]
+tse_spec <- agglomerateByRank(tse, rank = "genus", onRankOnly = TRUE)
+tse_rel  <- transformAssay(tse_spec, assay.type = "counts", method = "relabundance")
+
+# --- Define "Other" phyla (<1% mean abundance) ---
+genus_means <- rowMeans(assay(tse_rel, "relabundance"))
+rowData(tse_rel)$genus <- ifelse(genus_means >= 0.01,
+                                  rowData(tse_rel)$genus,
+                                  "Other")
+
+# Merge small phyla
+tse_combined <- mergeFeaturesByRank(
+  tse_rel,
+  rank = "genus",
+  onRankOnly = TRUE
+)
+
+# Drop zero rows
+keep <- rowSums(assay(tse_combined, "relabundance")) > 0
+tse_filtered <- tse_combined[keep, ]
+
+# Update column names to Patient_day_inj
+cd <- colData(tse_combined)
+rownames(cd) <- cd$Patient_day_inj
+colData(tse_combined) <- cd
+
+# Remove the "Other" row for plotting
+tse_filtered <- tse_combined[rowData(tse_combined)$genus != "Other", ]
+
+# =====================================================
+# PLOT
+# =====================================================
+
+# Build an ordering key and factor it by Tumor_Type -> Patient
+cd <- as.data.frame(colData(tse_combined))
+stopifnot(all(c("Tumor_Type", "Patient_day") %in% colnames(cd)))
+
+# Key for sorting and for readable labels if you want
+cd$Tumor_Patient <- paste0(cd$Tumor_Type, "_", cd$Patient_day)
+
+# Compute the multi-criteria order
+ord <- order(cd$Tumor_Type, cd$Patient_day, na.last = TRUE)
+
+# Make Tumor_Patient an ordered factor according to ord
+cd$Tumor_Patient <- factor(cd$Tumor_Patient, levels = cd$Tumor_Patient[ord], ordered = TRUE)
+
+# Write back to colData
+colData(tse_combined) <- S4Vectors::DataFrame(cd)
+
+# Change rownames of the colData to the Patient ID
+col_data_tse <- colData(tse_combined)
+rownames(col_data_tse) <- col_data_tse$Tumor_Patient
+colData(tse_combined) <- col_data_tse
+
+# Filter out the "Other"  from rowData
+tse_combined <- tse_combined[rowData(tse_combined)$genus != "Other", ]
+
+# Now tell plotAbundance to order columns by this **column name**
+plotAbundance(
+  tse_combined,
+  rank = "genus",
+  assay.type = "relabundance",
+  order.row.by = "abund",
+  order.col.by = "Tumor_Type",  
+  add_x_text = TRUE
+) +
+  theme(
+    plot.title = element_text(face = "bold", size = 18),
+    axis.text.x = element_text(angle = 55, hjust = 1, size = 12),
+    axis.title.y = element_text(size = 14),
+    legend.title = element_text(face = "bold", size = 14),
+    legend.text = element_text(size = 14)
+  ) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1), expand = c(0, 0)) +
+  labs(title = "Other Cancer Types", x = "", y = "Rel. Abundance (%)") +
+  scale_fill_viridis_d(option = "C") +
+  labs(fill = "Genus", colour = NULL) +
+  guides(
+    colour = "none",
+    size = "none",
+    shape = "none",
+    linetype = "none",
+    alpha = "none"
+  )
+
+
+
+
+
+## Phylum specific boxplot
+
+# --- Load Kraken2 table and map ranks ---
+kraken2_data <- read_csv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/Kraken2_data_bacteria_only.csv")
+
+lvl_type_to_rank <- c(
+  R="root", D="domain", D1="domain", D2="domain",
+  K="kingdom",
+  P="phylum", P1="phylum",
+  C="class", C1="class", C2="class",
+  O="order", O1="order", O2="order",
+  F="family", F1="family",
+  G="genus", G1="genus",
+  S="species",
+  U="unclassified"
+)
+
+kraken2_data <- kraken2_data %>%
+  mutate(rank = lvl_type_to_rank[lvl_type])
+
+# --- Build counts matrix ---
+counts <- kraken2_data[, grep("_all$", colnames(kraken2_data))]
+counts <- counts[, !grepl("^tot_", colnames(counts))]
+
+rownames(counts) <- paste0(
+  kraken2_data$rank, "__",
+  gsub(" ", "_", kraken2_data$name), "_",
+  seq_len(nrow(kraken2_data))
+)
+
+# --- Row data ---
+taxonomy <- kraken2_data %>%
+  select(taxid, name, rank)
+
+# --- Metadata aligned to count columns ---
+metadata <- read_tsv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/config/metadata.tsv")
+metadata <- metadata %>% arrange(match(kraken_id, colnames(counts)))
+
+# --- Create TSE ---
+tse <- TreeSummarizedExperiment(
+  assays = list(counts = as.matrix(counts)),
+  rowData = taxonomy,
+  colData = DataFrame(metadata)
+)
+
+# create relabundance
+tse_rel <- transformAssay(
+  tse,
+  assay.type = "counts",
+  method = "relabundance"
+)
+
+# extract bacteria
+target_phylum <- "Bacteroidota"
+
+phylum_row <- which(
+  rowData(tse_rel)$rank == "phylum" &
+    rowData(tse_rel)$name == target_phylum
+)
+
+rowData(tse_rel)[phylum_row, ]
+
+# Filter
+#tse_rel <- tse_rel[, rownames(subset(colData(tse_rel), Time == "day_1"))]
+
+# plot
+plot_df <- as.data.frame(colData(tse_rel))
+
+plot_df$Abundance <- as.numeric(
+  assay(tse_rel, "relabundance")[phylum_row, ]
+)
+
+# Collapse all non-ovarian cancers into "Other"
+plot_df$Tumor_Type <- ifelse(
+  plot_df$Tumor_Type == "Ovarian",
+  "Ovarian",
+  "Other"
+)
+
+plot_df$Tumor_Type <- factor(
+  plot_df$Tumor_Type,
+  levels = c("Ovarian", "Other")
+)
+
+ggplot(
+  plot_df,
+  aes(x = Tumor_Type,
+      y = Abundance,
+      fill = Tumor_Type)
+) +
+  geom_boxplot(
+    outlier.shape = NA,
+    alpha = 0.7
+  ) +
+  geom_jitter(
+    aes(color = Tumor_Type),
+    width = 0.15,
+    size = 2
+  ) +
+  #geom_text_repel(
+  #  aes(label = Patient_day),
+  #  size = 3,
+  #  show.legend = FALSE
+  #) +
+  geom_signif(
+    comparisons = list(c("Ovarian", "Other")),
+    test = "wilcox.test",
+    map_signif_level = function(p)
+      paste0("p = ", signif(p, 3))
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Ovarian" = "#C2A3E0",
+      "Other" = "#D4A017"
+    )
+  ) +
+  scale_color_manual(
+    values = c(
+      "Ovarian" = "#C2A3E0",
+      "Other" = "#D4A017"
+    )
+  ) +
+  scale_y_log10() +
+  labs(
+    title = paste(target_phylum),
+    y = "Relative abundance",
+    x = NULL
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(
+      face = "bold",
+      size = 12,
+      hjust = 0.5
+    )
+  )
+
+
+
+
+
+
+
+## genus specific boxplot
+
+# --- Load Kraken2 table and map ranks ---
+kraken2_data <- read_csv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/Kraken2_data_bacteria_only.csv")
+
+lvl_type_to_rank <- c(
+  R="root", D="domain", D1="domain", D2="domain",
+  K="kingdom",
+  P="genus", P1="genus",
+  C="class", C1="class", C2="class",
+  O="order", O1="order", O2="order",
+  F="family", F1="family",
+  G="genus", G1="genus",
+  S="species",
+  U="unclassified"
+)
+
+kraken2_data <- kraken2_data %>%
+  mutate(rank = lvl_type_to_rank[lvl_type])
+
+# --- Build counts matrix ---
+counts <- kraken2_data[, grep("_all$", colnames(kraken2_data))]
+counts <- counts[, !grepl("^tot_", colnames(counts))]
+
+rownames(counts) <- paste0(
+  kraken2_data$rank, "__",
+  gsub(" ", "_", kraken2_data$name), "_",
+  seq_len(nrow(kraken2_data))
+)
+
+# --- Row data ---
+taxonomy <- kraken2_data %>%
+  select(taxid, name, rank)
+
+# --- Metadata aligned to count columns ---
+metadata <- read_tsv("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/config/metadata.tsv")
+metadata <- metadata %>% arrange(match(kraken_id, colnames(counts)))
+
+# --- Create TSE ---
+tse <- TreeSummarizedExperiment(
+  assays = list(counts = as.matrix(counts)),
+  rowData = taxonomy,
+  colData = DataFrame(metadata)
+)
+
+# create relabundance
+tse_rel <- transformAssay(
+  tse,
+  assay.type = "counts",
+  method = "relabundance"
+)
+
+# extract bacteria
+target_genus <- "Anaerococcus"
+
+genus_row <- which(
+  rowData(tse_rel)$rank == "genus" &
+    rowData(tse_rel)$name == target_genus
+)
+
+rowData(tse_rel)[genus_row, ]
+
+# Filter
+#tse_rel <- tse_rel[, rownames(subset(colData(tse_rel), Time == "day_1"))]
+
+# plot
+plot_df <- as.data.frame(colData(tse_rel))
+
+plot_df$Abundance <- as.numeric(
+  assay(tse_rel, "relabundance")[genus_row, ]
+)
+
+# Collapse all non-ovarian cancers into "Other"
+plot_df$Tumor_Type <- ifelse(
+  plot_df$Tumor_Type == "Ovarian",
+  "Ovarian",
+  "Other"
+)
+
+plot_df$Tumor_Type <- factor(
+  plot_df$Tumor_Type,
+  levels = c("Ovarian", "Other")
+)
+
+ggplot(
+  plot_df,
+  aes(x = Tumor_Type,
+      y = Abundance,
+      fill = Tumor_Type)
+) +
+  geom_boxplot(
+    outlier.shape = NA,
+    alpha = 0.7
+  ) +
+  geom_jitter(
+    aes(color = Tumor_Type),
+    width = 0.15,
+    size = 2
+  ) +
+  #geom_text_repel(
+  #  aes(label = Patient_day),
+  #  size = 3,
+  #  show.legend = FALSE
+  #) +
+  geom_signif(
+    comparisons = list(c("Ovarian", "Other")),
+    test = "wilcox.test",
+    map_signif_level = function(p)
+      paste0("p = ", signif(p, 3))
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Ovarian" = "#C2A3E0",
+      "Other" = "#D4A017"
+    )
+  ) +
+  scale_color_manual(
+    values = c(
+      "Ovarian" = "#C2A3E0",
+      "Other" = "#D4A017"
+    )
+  ) +
+  scale_y_log10() +
+  labs(
+    title = target_genus,
+    y = "Relative abundance",
+    x = NULL
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(
+      face = "bold",
+      size = 12,
+      hjust = 0.5
+    )
+  )
