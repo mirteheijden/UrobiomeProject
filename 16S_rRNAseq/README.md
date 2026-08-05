@@ -13,7 +13,7 @@ In Puhti, set working directory: config, DATA, DB, LOGS, RESULTS, SCRIPTS, workf
 download FASTA file from here: https://www.ncbi.nlm.nih.gov/data-hub/genome/GCA_009914755.4/ If you downloaded it from local dir copy it to puhti using scp 
 - $ unzip T2T-CHM13v2.0.zip 
 
-**Kraken2 database**
+**Kraken2**
 - $ wget https://genome-idx.s3.amazonaws.com/kraken/16S_Silva138_20200326.tgz 
 - $ tar -xzf 16S_Silva138_20200326.tar.gz
 
