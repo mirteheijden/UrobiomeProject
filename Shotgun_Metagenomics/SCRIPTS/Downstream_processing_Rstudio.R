@@ -91,29 +91,29 @@ colData(tse)$Patient <- factor(colData(tse)$Patient,
 # Plot with patients in the specified order
 plotColData(
   tse,
-  y = "observed",      # y variable (numeric)
-  x = "Patient",       # x variable (ordered categorical - patient names)
-  colour_by = "Response",   # Colour by another variable
+  y = "observed",      
+  x = "Patient",       
+  colour_by = "Response",   
   point_size = 4 +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),  # Larger x-axis labels
-        axis.text.y = element_text(size = 14),  # Larger y-axis labels
-        axis.title.x = element_text(size = 18),  # Larger axis title
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),  
+        axis.text.y = element_text(size = 14), 
+        axis.title.x = element_text(size = 18),  
         axis.title.y = element_text(size = 18),  
-        plot.title = element_text(size = 18, face = "bold", hjust = 0.5),  # Bigger, bold title
-        legend.text = element_text(size = 14),  # Bigger legend text
-        legend.title = element_text(size = 16),  # Bigger legend title
-        panel.grid.major = element_blank(),  # Remove major grid lines
-        panel.grid.minor = element_blank(),  # Remove minor grid lines
+        plot.title = element_text(size = 18, face = "bold", hjust = 0.5),  
+        legend.text = element_text(size = 14),  
+        legend.title = element_text(size = 16),  
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),  
   ) +
   labs(
     title = "Alpha diversity (Shannon)",
     x = "
     Patient", 
     y = expression(Richness[Observed]), 
-    colour = "Response"  # Change legend title
+    colour = "Response"  
   ) +
   scale_colour_manual(values = c("DC" = "blue", "No_DC" = "orange")) +
-  guides(colour = guide_legend(override.aes = list(size = 6)))  # Adjust dot size in legend
+  guides(colour = guide_legend(override.aes = list(size = 6)))  
 
 
 library(dplyr)
@@ -146,7 +146,7 @@ violin_alpha <- ggplot(df_alpha, aes(x = Response, y = observed)) +
   geom_boxplot(
     aes(fill = Response),
     color         = "black",
-    width         = 0.12,        # narrow inner boxplot
+    width         = 0.12,        
     outlier.shape = NA
   ) +
   
@@ -234,7 +234,7 @@ bray_curtis_pcoa_df <- cbind(bray_curtis_pcoa_df,
 bray_curtis_plot <- ggplot(data = bray_curtis_pcoa_df, 
                            aes(x = pcoa1, y = pcoa2, color = patient_status)) +
   geom_point() + 
-  geom_text(aes(label = label), size = 3, vjust = 1.5, show.legend = FALSE) +  # Labels for each point (Patient names)
+  geom_text(aes(label = label), size = 3, vjust = 1.5, show.legend = FALSE) +  
   
   # Add circles around the groups with colored outlines 
   geom_mark_ellipse(aes(group = patient_status), 
@@ -246,22 +246,22 @@ bray_curtis_plot <- ggplot(data = bray_curtis_pcoa_df,
        y = "PC2", 
        colour = "Response",
        title = "Beta diversity between groups") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),  # Larger x-axis labels
-        axis.text.y = element_text(size = 14),  # Larger y-axis labels
-        axis.title.x = element_text(size = 14),  # Larger axis title
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),  
+        axis.text.y = element_text(size = 14),  
+        axis.title.x = element_text(size = 14),  
         axis.title.y = element_text(size = 14),  
-        plot.title = element_text(size = 12, face = "bold"),  # Bigger, bold title
-        legend.text = element_text(size = 14),  # Bigger legend text
-        legend.title = element_text(size = 16),  # Bigger legend title
-        panel.grid.major = element_blank(),  # Remove major grid lines
-        panel.grid.minor = element_blank(),  # Remove minor grid lines
-        panel.background = element_rect(fill = "white", color = NA),  # White background
+        plot.title = element_text(size = 12, face = "bold"),  
+        legend.text = element_text(size = 14),  
+        legend.title = element_text(size = 16),  
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),  
+        panel.background = element_rect(fill = "white", color = NA), 
         axis.line = element_line(color = "black", linewidth = 0.4)
         ) +
-  scale_x_continuous(expand = expansion(mult = 0.3)) + # Adjust horizontal space
-  scale_y_continuous(expand = expansion(mult = 0.3)) + # Adjust vertical space
-  scale_color_manual(values = c("DC" = "blue", "No_DC" = "orange")) + # Define custom colors
-  guides(colour = guide_legend(override.aes = list(size = 6)))  # Adjust dot size in legend
+  scale_x_continuous(expand = expansion(mult = 0.3)) + 
+  scale_y_continuous(expand = expansion(mult = 0.3)) +
+  scale_color_manual(values = c("DC" = "blue", "No_DC" = "orange")) + 
+  guides(colour = guide_legend(override.aes = list(size = 6)))  
 
 # Display the plot
 bray_curtis_plot
@@ -317,8 +317,6 @@ significant_results$taxon <- gsub("^s__", "", significant_results$taxon)
 significant_results <- significant_results[significant_results$taxon != "" & !is.na(significant_results$taxon), ]
 
 significant_results$highlight <- ifelse(significant_results$Response == "DC", "lightblue", "#FFC300")
-#significant_results$highlight <- factor(significant_results$highlight, 
-#                                        levels = c("lightblue", "#FFC300"))
 
 # Border color column
 significant_results$border <- ifelse(significant_results$taxon == "Prevotella_timonensis", "darkred", NA)
@@ -356,10 +354,6 @@ bar_plot <- ggplot(significant_results, aes(x = reorder(taxon, log2FoldChange),
   )
 
 print(bar_plot)
-
-# Counts of P. timonensis
-# colors "lightgreen", "deepskyblue2"
-assay(tse_spec)["s__Prevotella_timonensis", ]
 
 
 
@@ -419,27 +413,26 @@ significant_results$taxon <- gsub("^g__", "", significant_results$taxon)
 # Remove rows where "taxon" is empty or NA
 significant_results <- significant_results[significant_results$taxon != "" & !is.na(significant_results$taxon), ]
 
-# color codes: G = b_l_ue, o_r_a_nge and S = l_i_g_htblue, #F_F_C_300
 # Create the bar plot with the 'Response' column for color mapping
 bar_plot <- ggplot(significant_results, aes(x = reorder(taxon, log2FoldChange), y = log2FoldChange, fill = Response)) +
-  geom_bar(stat = "identity", show.legend = TRUE) +  # Show legend
-  scale_fill_manual(values = c("DC" = "blue", "No_DC" = "orange")) +  # blue for DC, #DFFC300 for No_DC (positive log2FoldChange)
-  coord_flip() +  # Flip coordinates to make taxa names readable
+  geom_bar(stat = "identity", show.legend = TRUE) +  
+  scale_fill_manual(values = c("DC" = "blue", "No_DC" = "orange")) + 
+  coord_flip() +  
   labs(title = "Differential abundant genus 
   (shotgun metagenomics)", x = "Taxon", y = "Log Fold Change") +
   theme_minimal() +
-  theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 14),  # Larger x-axis labels
-        axis.text.y = element_text(size = 14, face = "italic"),  # Larger y-axis labels
-        axis.title.x = element_text(size = 18),  # Larger axis title
+  theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 14),  
+        axis.text.y = element_text(size = 14, face = "italic"),  
+        axis.title.x = element_text(size = 18),  
         axis.title.y = element_text(size = 18),  
-        plot.title = element_text(size = 20, face = "bold", hjust = 0),  # Bigger, bold title
-        legend.text = element_text(size = 14),  # Bigger legend text
-        legend.title = element_text(size = 16),  # Bigger legend title
-        panel.grid.major = element_blank(),  # Remove major grid lines
-        panel.grid.minor = element_blank(),  # Remove minor grid lines
+        plot.title = element_text(size = 20, face = "bold", hjust = 0),  
+        legend.text = element_text(size = 14), 
+        legend.title = element_text(size = 16),  
+        panel.grid.major = element_blank(),  
+        panel.grid.minor = element_blank(),  
   ) +
   guides(fill = guide_legend(title = "", 
-                             labels = c("DC", "No_DC")))  # Custom labels for the legend
+                             labels = c("DC", "No_DC")))  
 
 # Print the plot
 print(bar_plot)
@@ -474,7 +467,7 @@ metadata_df <- as.data.frame(colData(tse))
 metadata_df <- metadata_df[metadata_df$Day == "1" & metadata_df$Response %in% c("DC", "No_DC"), ]
 
 # Transpose assay data
-tse_assay <- t(assay(tse, "relabundance"))  # Use the manually transformed relative abundance data
+tse_assay <- t(assay(tse, "relabundance"))  
 
 # Merge metadata with transposed assay data
 merged_data <- merge(metadata_df, as.data.frame(tse_assay), by.x = "row.names", by.y = "row.names", all.x = TRUE)
@@ -489,12 +482,12 @@ plot_list <- list()
 colnames(merged_data) <- gsub("\\[|\\]", "", colnames(merged_data))
 all_columns <- colnames(merged_data)[11:ncol(merged_data)]
 print(all_columns)
-## Change the 16:ncol from where the first species starts!!
+## Change the 11:ncol from where the first species starts!!
 
 #check relative abundance
 row_sums <- rowSums(merged_data[, 16:ncol(merged_data)], na.rm = TRUE)  
 print(row_sums)
-summary(row_sums)  # Check if values are around 1
+summary(row_sums) 
 
 
 # Remove columns where all values are 0 or NA
@@ -574,7 +567,7 @@ library(dplyr)
 library(tidyr)
 library(readr)
 
-tse <- tse_Metaphlan #already in relabundance style
+tse <- tse_Metaphlan
 
 # Extract day 1 samples and samples with a known disease outcome
 tse <- tse[, which(colData(tse)$Day %in% c("1", "8", "36"))]
@@ -615,14 +608,7 @@ combined_tse <- combined_tse[, order(colData(combined_tse)$Patient_day)]
 # Convert Patient_day to factor for proper plotting order
 colData(combined_tse)$Patient_day <- factor(colData(combined_tse)$Patient_day, 
                                             levels = sort(unique(colData(combined_tse)$Patient_day)))
-
-### Filter for DC Group
-#combined_tse_DC <- combined_tse[, colData(combined_tse)$Response == "DC"]
-
-# Remove "_1" suffix from sample names
-#colData(combined_tse)$Response_Patient_day <- gsub("_1$", "", colData(combined_tse)$Response_Patient_day)
-#rownames(colData(combined_tse)) <- colData(combined_tse)$Response_Patient_day
-
+                                   
 # Order samples as specified
 desired_order <- c("DC_30105_1", "DC_30105_8", "DC_30105_36", "DC_30111_1", "DC_30111_8", "DC_30111_36", "DC_30112_1", "DC_30112_8", "DC_30112_36",
                    "DC_30207_1", "DC_30207_8", "DC_30207_36", "DC_30210_1", "DC_30210_8", "DC_30210_36",
@@ -679,7 +665,7 @@ df_long$color <- patient_colors[df_long$Patient]
 ## Plot
 ggplot(df_long, aes(x = Sample, y = Abundance, fill = color)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_identity() +   # <-- IMPORTANT
+  scale_fill_identity() +
   theme_minimal(base_size = 14) +
   theme(
     axis.text.x = element_text(size = 14, angle = 90, vjust = 0.5, hjust = 1),
