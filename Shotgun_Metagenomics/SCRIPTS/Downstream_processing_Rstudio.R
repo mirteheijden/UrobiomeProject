@@ -1,4 +1,4 @@
-############ Shotgun metagenomics 
+############ Shotgun metagenomicss
 # Load required packages
 library(qiime2R)
 library(mia)
@@ -20,7 +20,7 @@ library(devtools)
 
 
 ##TSE from Metaphlan
-tse_Metaphlan <- importMetaPhlAn("path/human_urine/Batch 4/MetaPhlan/metaphlan_db_meta4_combined_reports.txt", "path/human_urine/Batch 4/Puhti/metadata.tsv", package = "mia")
+tse_Metaphlan <- importMetaPhlAn("path/metaphlan_db_meta4_combined_reports.txt", "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 4/Puhti/metadata.tsv", package = "mia")
 
 # change MI_ID rownames of the tse, to our sample_ID
 col_data_Metaphlan <- colData(tse_Metaphlan)
@@ -33,7 +33,7 @@ col_data_Metaphlan <- as.data.frame(colData(tse_Metaphlan))
 # Check for NAs in species column
 sum(is.na(rowData(tse_Metaphlan)$species))
 
-# Check for duplicate species names (can happen with SGBs)
+# Check for duplicate species names
 sum(duplicated(rowData(tse_Metaphlan)$species))
 
 # If duplicates exist, make them unique
@@ -63,8 +63,6 @@ colSums(assay(tse_Metaphlan, "relabundance")) |> head()  # should be ~1
 ## Alpha diversity - Shannon - Genus/species
 
 ########## Response #############
-# GG2
-#tse <- tse_GG2
 tse <- tse_Metaphlan
 
 # Extract day 1 samples and samples with a known disease outcome
@@ -385,7 +383,7 @@ bar_plot <- ggplot(significant_results, aes(x = reorder(taxon, log_fold_change),
        ", y = "Log Fold Change") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 14),
-        axis.text.y = element_text(size = 14),
+        axis.text.y = element_text(size = 14, face = "italic"),
         axis.title.x = element_text(size = 18),
         axis.title.y = element_text(size = 18),  
         plot.title = element_text(size = 16, face = "bold", hjust = 0),
@@ -510,7 +508,7 @@ bar_plot <- ggplot(significant_results, aes(x = reorder(taxon, log_fold_change),
        ", y = "Log Fold Change") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 14),  # Larger x-axis labels
-        axis.text.y = element_text(size = 14),  # Larger y-axis labels
+        axis.text.y = element_text(size = 14, face = "italic"),  # Larger y-axis labels
         axis.title.x = element_text(size = 18),  # Larger axis title
         axis.title.y = element_text(size = 18),  
         plot.title = element_text(size = 16, face = "bold", hjust = 0),  # Bigger, bold title
@@ -596,6 +594,7 @@ bar_plot <- ggplot(significant_results, aes(x = reorder(taxon, log2FoldChange),
   geom_bar(stat = "identity", show.legend = TRUE, linewidth = 0.8) +
   scale_fill_manual(name = NULL,
                     values = c("lightblue" = "lightblue", "#FFC300" = "#FFC300"),
+                    breaks = c("lightblue", "#FFC300"),
                     labels = c("lightblue" = "DC", 
                                "#FFC300"   = "No_DC")) +
   scale_color_identity() +
@@ -605,7 +604,7 @@ bar_plot <- ggplot(significant_results, aes(x = reorder(taxon, log2FoldChange),
        ", y = "Log Fold Change") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 14),
-        axis.text.y = element_text(size = 14, 
+        axis.text.y = element_text(size = 14, face = "italic",
                                    color = significant_results$text_color[order(significant_results$log2FoldChange)]),
         axis.title.x = element_text(size = 18),
         axis.title.y = element_text(size = 18),  
@@ -691,7 +690,7 @@ bar_plot <- ggplot(significant_results, aes(x = reorder(taxon, log2FoldChange), 
   (shotgun metagenomics)", x = "Taxon", y = "Log Fold Change") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 14),  # Larger x-axis labels
-        axis.text.y = element_text(size = 14),  # Larger y-axis labels
+        axis.text.y = element_text(size = 14, face = "italic"),  # Larger y-axis labels
         axis.title.x = element_text(size = 18),  # Larger axis title
         axis.title.y = element_text(size = 18),  
         plot.title = element_text(size = 20, face = "bold", hjust = 0),  # Bigger, bold title
@@ -745,7 +744,7 @@ merged_data <- merge(metadata_df, as.data.frame(tse_assay), by.x = "row.names", 
 merged_data$Response <- factor(merged_data$Response, levels = c("DC", "No_DC"))
 
 # Directory to save the combined PDF
-output_dir <- "path/human_urine/RESULTS"
+output_dir <- "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS"
 output_pdf <- file.path(output_dir, "Wilcoxon_species_MetaPhlan4.pdf")
 
 
@@ -867,7 +866,7 @@ dev.off()
 results_df$Adjusted_P <- p.adjust(results_df$P_value, method = "BH")
 
 # Write results to Excel
-write_xlsx(results_df, "path/human_urine/RESULTS/wilcoxon_barplots_species_MetaPhlan4.xlsx")
+write_xlsx(results_df, "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS/wilcoxon_barplots_species_MetaPhlan4.xlsx")
 
 
 
@@ -906,7 +905,7 @@ merged_data <- merge(metadata_df, as.data.frame(tse_assay), by.x = "row.names", 
 merged_data$Response <- factor(merged_data$Response, levels = c("DC", "No_DC"))
 
 # Directory to save the combined PDF
-output_dir <- "path/human_urine/RESULTS"
+output_dir <- "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS"
 output_pdf <- file.path(output_dir, "Wilcoxon_species_MetaPhlan4.pdf")
 
 
@@ -963,6 +962,7 @@ prevotella_plot <- ggplot(df_prev, aes(x = Response, y = Prevotella_timonensis, 
     comparisons      = list(c("DC", "No_DC")),
     test             = "wilcox.test",
     map_signif_level = function(p) paste0("p = ", signif(p, 3)),
+    y_position = max(df_prev$Prevotella_timonensis, na.rm = TRUE) * 1.15,
     step_increase    = 0.12,
     color            = "black",
     size             = 0.6,
@@ -978,7 +978,7 @@ prevotella_plot <- ggplot(df_prev, aes(x = Response, y = Prevotella_timonensis, 
   ) +
   theme_minimal() +
   theme(
-    plot.title       = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.title       = element_text(size = 14, face = "bold.italic", hjust = 0.5),
     axis.title.y     = element_text(size = 14, margin = margin(r = 10)),
     axis.text        = element_text(size = 12),
     axis.text.x      = element_text(color = "black", size = 12),
@@ -1258,7 +1258,7 @@ ggplot(df_long, aes(x = Sample, y = Abundance, fill = color)) +
 
 
 # Write results to Excel
-write_xlsx(df_long, "path/human_urine/RESULTS/T563_shotgun_metagenomics/df_long_metaphlan.xlsx")
+write_xlsx(df_long, "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS/T563_shotgun_metagenomics/df_long_metaphlan.xlsx")
 
 
 
@@ -1655,7 +1655,7 @@ print(heatmap_plot)
 
 # HEATMAP all species
 ##TSE from GG2
-tse_GG2 <- importQIIME2("path/human_urine/Batch 2/Puhti/RESULTS_taxprofiler/Snakemake_GG2/counts.qza", taxonomy = "path/human_urine/Batch 2/Puhti/RESULTS_taxprofiler/Snakemake_GG2/taxonomy.qza", sampleMetaFile="path/human_urine/Batch 2/Puhti/config/metadata_GG2.tsv")
+tse_GG2 <- importQIIME2("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/RESULTS_taxprofiler/Snakemake_GG2/counts.qza", taxonomy = "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/RESULTS_taxprofiler/Snakemake_GG2/taxonomy.qza", sampleMetaFile="Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 2/Puhti/config/metadata_GG2.tsv")
 # change rownames of the tse, to our sample_ID
 col_data_GG2 <- colData(tse_GG2)
 rownames(col_data_GG2) <- col_data_GG2$Patient_day
@@ -1908,11 +1908,11 @@ library(patchwork)
 
 # Gene family data
 # EC
-#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
+#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
 # KO
-#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
+#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
 # GO
-gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
+gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
 
 
 # --- Step 1: Set row names from first column and clean gene_family_data ---
@@ -1925,7 +1925,7 @@ colnames(gene_family_data) <- sapply(colnames(gene_family_data), extract_sample_
 
 # --- Step 2: Load metadata ---
 metadata <- read.table(
-  "path/human_urine/Batch 3/puhti/metadata.tsv",
+  "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/puhti/metadata.tsv",
   header = TRUE, sep = "\t", row.names = 1, check.names = FALSE
 )
 
@@ -2025,7 +2025,7 @@ print(plot_cc)
 
 
 write.xlsx(significant_results[, c("Feature", "pval")],
-           file = "path/human_urine/RESULTS/T563_shotgun_metagenomics/wilcoxon_kegg_results.xlsx",
+           file = "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS/T563_shotgun_metagenomics/wilcoxon_kegg_results.xlsx",
            row.names = FALSE)
 
 
@@ -2036,13 +2036,13 @@ write.xlsx(significant_results[, c("Feature", "pval")],
 
 # Gene family data
 # EC
-#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
+#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
 # KO
-#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
+#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
 # GO
-gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
+gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
 # MetaCyc (ERROR!)
-#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_MetaCyc_unstratified.txt", header = T)
+#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_MetaCyc_unstratified.txt", header = T)
 
 
 # Set row names from first column and remove that column
@@ -2055,7 +2055,7 @@ colnames(gene_family_data) <- sapply(colnames(gene_family_data), extract_sample_
 
 # --- Load metadata ---
 metadata <- read.table(
-  "path/human_urine/Batch 3/puhti/metadata.tsv",
+  "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/puhti/metadata.tsv",
   header = TRUE, sep = "\t", row.names = 1, check.names = FALSE
 )
 
@@ -2301,13 +2301,13 @@ ggplot(plot_data, aes(x = GeneRatio, y = Feature)) +
 ################ barplots 
 library(stringr)
 # EC
-#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
+#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
 # KO
-#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
+#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
 # GO
-gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
+gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
 # MetaCyc (ERROR!)
-#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_MetaCyc_unstratified.txt", header = T)
+#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_MetaCyc_unstratified.txt", header = T)
 
 
 # Set row names from first column and remove that column
@@ -2320,7 +2320,7 @@ colnames(gene_family_data) <- sapply(colnames(gene_family_data), extract_sample_
 
 # --- Load metadata ---
 metadata <- read.table(
-  "path/human_urine/Batch 3/puhti/metadata_GG2.tsv",
+  "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/puhti/metadata_GG2.tsv",
   header = TRUE, sep = "\t", row.names = 1, check.names = FALSE
 )
 
@@ -2482,11 +2482,11 @@ library(stringr)
 
 # Gene family data
 # EC
-#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
+#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_EC_unstratified.txt", header = T)
 # KO
-#gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
+#gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_KO_unstratified.txt", header = T)
 # GO
-gene_family_data <- read.delim("path/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
+gene_family_data <- read.delim("Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/Humann3/RenormRename_genefamilies_Uniref90_GO_unstratified.txt", header = T)
 
 
 # Set row names from first column and remove that column
@@ -2499,7 +2499,7 @@ colnames(gene_family_data) <- sapply(colnames(gene_family_data), extract_sample_
 
 # --- Load metadata ---
 metadata <- read.table(
-  "path/human_urine/Batch 3/puhti/metadata_GG2.tsv",
+  "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Batch 3/puhti/metadata_GG2.tsv",
   header = TRUE, sep = "\t", row.names = 1, check.names = FALSE
 )
 
@@ -2595,7 +2595,7 @@ p_bp / p_mf / p_cc
 
 
 #write.xlsx(significant_results[, c("Feature", "pval")],
-#           file = "path/human_urine/RESULTS/T563_shotgun_metagenomics/wilcoxon_kegg_results.xlsx",
+#           file = "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/RESULTS/T563_shotgun_metagenomics/wilcoxon_kegg_results.xlsx",
 #           row.names = FALSE)
 
 
@@ -2610,12 +2610,12 @@ library(tidyr)
 
 # Read data
 fixed_effect_df <- read_excel(
-  "path/human_urine/Fixed_effects.xlsx"
+  "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Fixed_effects.xlsx"
 )
 
 
 fixed_effect_df <- read_excel(
-  "path/human_urine/Fixed_effects.xlsx"
+  "Z:/PhD CGTG/Experiments/Metagenomics/human_urine/Fixed_effects.xlsx"
 ) %>%
   mutate(
     Patients = as.character(Patients),
