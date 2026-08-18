@@ -1,7 +1,7 @@
 # load
 library(TreeSummarizedExperiment)
 library(taxa)
-library(microbiome) # for transformations
+library(microbiome) 
 library(dplyr)
 library(readr)
 library(stringr)
@@ -142,7 +142,7 @@ tse_genus <- mergeFeaturesByRank(
 
 # Function to filter genera present in at least 4 samples
 filter_genus <- function(tse_genus) {
-  genus_counts <- rowSums(assay(tse_genus) > 0)  # Count non-zero occurrences
+  genus_counts <- rowSums(assay(tse_genus) > 0)  
   tse_genus_filtered <- tse_genus[genus_counts >= 4, ]  # Keep genera in ≥4 samples
   return(tse_genus_filtered)
 }
@@ -164,22 +164,22 @@ venn_list <- list(Other = genus_other, Ovarian = genus_ovarian)
 set.seed(20231214)
 
 # plot Venn diagram
-ggVennDiagram(venn_list, label_alpha = 0, label_size = 8) +  # Increase text size
-  scale_fill_gradient(low = "#D4A017", high = "#C2A3E0") +  # Softer colors
-  theme_void() +  # Remove grid/background
+ggVennDiagram(venn_list, label_alpha = 0, label_size = 8) +  
+  scale_fill_gradient(low = "#D4A017", high = "#C2A3E0") +  
+  theme_void() +  
   theme(
-    plot.margin = margin(10, 10, 10, 10),  # Adjust margins
-    legend.position = "none",  # Hide unnecessary legend
-    text = element_text(size = 16, face = "bold"),  # Increase overall text size & bold
+    plot.margin = margin(10, 10, 10, 10), 
+    legend.position = "none",  
+    text = element_text(size = 16, face = "bold"),  
     plot.title = element_text(hjust = 0.50)
   ) +
   labs(title = "Baseline") +
-  coord_flip()  # Flip the layout to horizontal
+  coord_flip() 
 
 # Print genera
 # Find exclusive genera
-only_other_genus <- setdiff(genus_other, overlapping_genus)   # Genera only in "Other"
-only_ovarian_genus <- setdiff(genus_ovarian, overlapping_genus)  # Genera only in "Ovarian"
+only_other_genus <- setdiff(genus_other, overlapping_genus)   
+only_ovarian_genus <- setdiff(genus_ovarian, overlapping_genus) 
 
 # Sort the results alphabetically
 overlapping_genus <- sort(overlapping_genus)
@@ -187,9 +187,9 @@ only_other_genus <- sort(only_other_genus)
 only_ovarian_genus <- sort(only_ovarian_genus)
 
 # View results
-View(as.data.frame(overlapping_genus))  # Genera present in both
-View(as.data.frame(only_other_genus))         # Genera only in "Other"
-View(as.data.frame(only_ovarian_genus))       # Genera only in "Ovarian"
+View(as.data.frame(overlapping_genus))  
+View(as.data.frame(only_other_genus))        
+View(as.data.frame(only_ovarian_genus))      
 
 #Save in Excel
 
@@ -300,7 +300,7 @@ plotAbundance(
   rank = "phylum",
   assay.type = "relabundance",
   order.row.by = "abund",
-  order.col.by = "Tumor_Type",  # or your chosen colData key
+  order.col.by = "Tumor_Type",  
   add_x_text = TRUE
 ) +
   theme(
@@ -321,11 +321,6 @@ plotAbundance(
     linetype = "none",
     alpha = "none"
   )
-
-
-
-
-
 
 
 
@@ -378,7 +373,6 @@ colData(tse_combined) <- cd
 tse_filtered <- tse_combined[rowData(tse_combined)$genus != "Other", ]
 
 # plot
-
 # Build an ordering key and factor it by Tumor_Type -> Patient
 cd <- as.data.frame(colData(tse_combined))
 stopifnot(all(c("Tumor_Type", "Patient_day") %in% colnames(cd)))
@@ -688,7 +682,7 @@ col_data_phylo <- as.data.frame(colData(tse_phylo))
 
 
 
-##### Response ####### Genus
+##### Response - Genus
 # After creating tse_phylo, replace row names with Genus names
 row_data <- rowData(tse_phylo)
 
@@ -775,8 +769,6 @@ significant_results$Response <- ifelse(significant_results$log_fold_change > 0, 
 
 # Assign colors based on Response only
 significant_results$highlight <- ifelse(significant_results$Response == "DC", "blue", "orange")
-
-# Ensure 'highlight' is a factor
 significant_results$highlight <- factor(significant_results$highlight, 
                                         levels = c("blue", "orange"))
 
@@ -816,7 +808,7 @@ print(bar_plot)
 
 
 
-##### Response ####### Species
+##### Response - Species
 # After creating tse_phylo, replace row names with Species names
 row_data <- rowData(tse_phylo)
 
@@ -946,8 +938,6 @@ bar_plot <- ggplot(significant_results, aes(x = reorder(taxon, log_fold_change),
 # Print the plot
 print(bar_plot)
 
-# Counts P. timonensis
-otu_table(pseq_Species)["Prevotella timonensis_A_3", ]
 
 
 
