@@ -1,4 +1,4 @@
-Pre-processing 16S rRNAseq data using nf-core/taxprofiler and kraken2 database
+Pre-processing 16S rRNAseq data using nf-core/taxprofiler and kraken2 database [https://nf-co.re/taxprofiler/1.1.5/] and using nf-core/ampliseq using DADA2 [https://nf-co.re/ampliseq/2.6.1/]
 
 In Puhti, set working directory: config, DATA, DB, LOGS, RESULTS, SCRIPTS, workflow
 - $ cd /scratch/project_XXXX/human_urine
